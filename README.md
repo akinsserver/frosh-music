@@ -127,4 +127,4 @@ Next phase will scaffold the modern Next.js 15 frontend with:
 - Responsive layout with desktop, mobile mini-player, and Android TV / Firestick D-pad remote navigation.
 - Persistent HTML5 / Web Audio player engine with continuous playback across routes.
 - Real-time synced lyrics modal with word/line highlighting.
-- Supabase auth & user library (playlists, likes, history).
+- Supabase auth (sign-in + invite-code sign-up) — built on the `dev` branch; see `music-web/SUPABASE_AUTH_SETUP.md`. User library (playlists, likes, history) still to come.

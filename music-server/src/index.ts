@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { getInnertube } from './services/innertube.js';
+import { getStreamerDiagnostics } from './services/streamer.js';
 import { searchRouter } from './routes/search.js';
 import { homeRouter } from './routes/home.js';
 import { albumRouter } from './routes/album.js';
@@ -57,7 +58,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
     status: 'ok',
     service: 'frosh-music-server',
     uptime: process.uptime(),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    streamer: getStreamerDiagnostics(),
   });
 });
 
@@ -106,4 +108,19 @@ process.on('SIGTERM', () => {
     console.log('Server terminated.');
     process.exit(0);
   });
+});
+
+// Prevent client disconnects / stream aborts from crashing the server process
+process.on('uncaughtException', (err: any) => {
+  if (err?.name === 'AbortError' || err?.code === 'ECONNRESET' || err?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+    return;
+  }
+  console.error('[Process] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  if (reason?.name === 'AbortError' || reason?.code === 'ECONNRESET') {
+    return;
+  }
+  console.error('[Process] Unhandled Rejection:', reason);
 });

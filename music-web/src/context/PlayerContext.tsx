@@ -12,6 +12,7 @@ import type { Song } from '@/types/music';
 import { getStreamUrl } from '@/lib/api';
 import { getOfflineAudioUrl } from '@/lib/offlineStorage';
 import { useLibrary } from './LibraryContext';
+import { useOffline } from './OfflineContext';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
@@ -54,6 +55,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
   const { recordPlay } = useLibrary();
+  const { isDownloaded } = useOffline();
 
   const [currentTrack, setCurrentTrack] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -93,8 +95,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
+  const startAudioPlayback = useCallback((audio: HTMLAudioElement, url: string) => {
+    if (audio.src !== url) {
+      audio.src = url;
+    }
+    audio
+      .play()
+      .then(() => {
+        setIsPlaying(true);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (err.name === 'NotAllowedError') {
+          setIsPlaying(false);
+        } else if (err.name !== 'AbortError') {
+          console.error('[Player] Playback failed:', err);
+          setError('Could not start playback. Check if music-server is running.');
+          setIsPlaying(false);
+        }
+        setIsLoading(false);
+      });
+  }, []);
+
   const loadAndPlay = useCallback(
-    async (track: Song) => {
+    (track: Song) => {
       const audio = audioRef.current;
       if (!audio) return;
 
@@ -110,42 +134,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         activeObjectUrlRef.current = null;
       }
 
-      const offlineUrl = await getOfflineAudioUrl(track.id);
-      if (offlineUrl) {
-        activeObjectUrlRef.current = offlineUrl;
-        audio.src = offlineUrl;
-      } else {
+      // Synchronous path for online streams so iOS Safari preserves user-gesture activation
+      if (!isDownloaded(track.id)) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('You are offline and this track is not downloaded.');
           setIsPlaying(false);
           setIsLoading(false);
           return;
         }
-        const streamUrl = getStreamUrl(track.id);
-        if (audio.src !== streamUrl) {
-          audio.src = streamUrl;
-        }
+        startAudioPlayback(audio, getStreamUrl(track.id));
+        return;
       }
 
-      audio
-        .play()
-        .then(() => {
-          setIsPlaying(true);
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          if (err.name === 'NotAllowedError') {
-            // Autoplay blocked by browser policy until user clicks
-            setIsPlaying(false);
-          } else if (err.name !== 'AbortError') {
-            console.error('[Player] Playback failed:', err);
-            setError('Could not start playback. Check if music-server is running.');
-            setIsPlaying(false);
-          }
-          setIsLoading(false);
-        });
+      // Offline downloaded track path
+      getOfflineAudioUrl(track.id).then((offlineUrl) => {
+        if (offlineUrl) {
+          activeObjectUrlRef.current = offlineUrl;
+          startAudioPlayback(audio, offlineUrl);
+        } else {
+          startAudioPlayback(audio, getStreamUrl(track.id));
+        }
+      });
     },
-    [recordPlay]
+    [recordPlay, isDownloaded, startAudioPlayback]
   );
 
   const playTrack = useCallback(
@@ -290,12 +301,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex((prevIdx) => (index < prevIdx ? prevIdx - 1 : prevIdx));
   }, []);
 
-  // Initialize hidden <audio> element once
+  // Attach listeners to DOM-mounted <audio> element once
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
+    const audio = audioRef.current;
+    if (!audio) return;
     audio.volume = 0.85;
-    audioRef.current = audio;
 
     const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
     const onDurationChange = () => {
@@ -314,8 +324,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const onError = () => {
       setIsLoading(false);
       setIsPlaying(false);
+      const mediaErr = audio.error;
+      if (mediaErr?.code === 1) return; // Ignore benign track-switch aborts
       if (audio.src) {
-        setError('Stream interrupted or unavailable.');
+        const detail = mediaErr?.message || (mediaErr?.code ? `code ${mediaErr.code}` : '');
+        console.error('[Player] Media error:', mediaErr?.code, mediaErr?.message, audio.src);
+        setError(detail ? `Stream unavailable (${detail}).` : 'Stream interrupted or unavailable.');
       }
     };
 
@@ -359,14 +373,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         : [],
     });
 
-    navigator.mediaSession.setActionHandler('play', togglePlay);
-    navigator.mediaSession.setActionHandler('pause', togglePlay);
+    navigator.mediaSession.setActionHandler('play', () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        setIsPlaying(false);
+      }
+    });
     navigator.mediaSession.setActionHandler('nexttrack', nextTrack);
     navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime !== undefined) seek(details.seekTime);
     });
-  }, [currentTrack, togglePlay, nextTrack, prevTrack, seek]);
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      const audio = audioRef.current;
+      if (audio) seek(Math.max(0, audio.currentTime - (details.seekOffset || 10)));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      const audio = audioRef.current;
+      if (audio) seek(Math.min(audio.duration || 0, audio.currentTime + (details.seekOffset || 10)));
+    });
+  }, [currentTrack, nextTrack, prevTrack, seek]);
+
+  // Keep OS Lock Screen playback state & scrubber synchronized (essential for iOS background audio)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (
+      typeof navigator === 'undefined' ||
+      !('mediaSession' in navigator) ||
+      typeof navigator.mediaSession.setPositionState !== 'function' ||
+      !currentTrack ||
+      !duration ||
+      duration <= 0
+    ) {
+      return;
+    }
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.max(0, Math.min(currentTime, duration)),
+      });
+    } catch {
+      // Ignore transient duration/position mismatches
+    }
+  }, [currentTrack, currentTime, duration]);
 
   // Global keyboard shortcuts (Desktop + Media Keys)
   useEffect(() => {
@@ -438,6 +499,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShowQueue,
       }}
     >
+      <audio ref={audioRef} preload="auto" playsInline className="hidden" />
       {children}
     </PlayerContext.Provider>
   );

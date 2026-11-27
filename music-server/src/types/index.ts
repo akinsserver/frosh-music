@@ -111,4 +111,5 @@ export interface StreamFormatInfo {
   contentLength?: number;
   audioSampleRate?: number;
   url: string;
+  extractor?: 'yt-dlp' | 'innertube';
 }

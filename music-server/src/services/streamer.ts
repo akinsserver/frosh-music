@@ -1,9 +1,9 @@
 import type { Response, Request } from 'express';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { Readable } from 'stream';
+import { once } from 'events';
 import { getInnertube } from './innertube.js';
 import type { StreamFormatInfo } from '../types/index.js';
 
@@ -14,14 +14,37 @@ interface CachedFormat {
   mimeType: string;
   bitrate: number;
   contentLength?: number;
+  extractor?: 'yt-dlp' | 'innertube';
   expiresAt: number;
 }
 
 // Cache TTL: 90 minutes (CDN URLs last ~6 hours)
 const streamCache = new Map<string, CachedFormat>();
 const CACHE_TTL_MS = 90 * 60 * 1000;
+const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
 
 let resolvedYtDlpBinary: { exe: string; prefixArgs: string[] } | null = null;
+let lastYtDlpError: string | null = null;
+
+function findExeInDir(dir: string, targetName: string, maxDepth = 2): string | null {
+  if (!dir || maxDepth < 0 || !fs.existsSync(dir)) return null;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) {
+        return fullPath;
+      }
+      if (entry.isDirectory() && maxDepth > 0) {
+        const nested = findExeInDir(fullPath, targetName, maxDepth - 1);
+        if (nested) return nested;
+      }
+    }
+  } catch {
+    // ignore permission errors
+  }
+  return null;
+}
 
 function resolveYtDlpBinary(): { exe: string; prefixArgs: string[] } {
   if (resolvedYtDlpBinary) return resolvedYtDlpBinary;
@@ -35,31 +58,86 @@ function resolveYtDlpBinary(): { exe: string; prefixArgs: string[] } {
   const appData = process.env.APPDATA || '';
   const localAppData = process.env.LOCALAPPDATA || '';
 
+  // 1. Scan WinGet Packages directly (avoids WinGet\Links App Execution Alias quirks)
+  const wingetDirs = [
+    path.join(localAppData, 'Microsoft', 'WinGet', 'Packages'),
+    path.join(userProfile, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Packages'),
+    'C:\\Program Files\\WinGet\\Packages',
+  ];
+  for (const pkgRoot of wingetDirs) {
+    if (fs.existsSync(pkgRoot)) {
+      try {
+        for (const folder of fs.readdirSync(pkgRoot)) {
+          if (folder.toLowerCase().includes('yt-dlp')) {
+            const found = findExeInDir(path.join(pkgRoot, folder), 'yt-dlp.exe', 2);
+            if (found) {
+              resolvedYtDlpBinary = { exe: found, prefixArgs: [] };
+              return resolvedYtDlpBinary;
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // 2. Direct candidate paths (WinGet Links, Scoop, Chocolatey, Python Scripts)
   const candidates = [
     path.join(localAppData, 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
-    path.join(localAppData, 'Microsoft', 'WindowsApps', 'yt-dlp.exe'),
     path.join(userProfile, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
-    path.join(appData, 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    path.join(userProfile, 'AppData', 'Roaming', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    path.join(localAppData, 'Programs', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    'yt-dlp.exe',
-    'yt-dlp',
+    path.join(localAppData, 'Microsoft', 'WindowsApps', 'yt-dlp.exe'),
+    path.join(userProfile, 'scoop', 'shims', 'yt-dlp.exe'),
+    'C:\\ProgramData\\chocolatey\\bin\\yt-dlp.exe',
   ];
+  for (const pyVer of ['Python315', 'Python314', 'Python313', 'Python312', 'Python311', 'Python310']) {
+    candidates.push(
+      path.join(appData, 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      path.join(userProfile, 'AppData', 'Roaming', 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      path.join(localAppData, 'Programs', 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      `C:\\${pyVer}\\Scripts\\yt-dlp.exe`
+    );
+  }
 
   for (const cand of candidates) {
-    if (cand.includes(path.sep) && fs.existsSync(cand)) {
+    if (cand && fs.existsSync(cand)) {
       resolvedYtDlpBinary = { exe: cand, prefixArgs: [] };
       return resolvedYtDlpBinary;
     }
   }
 
-  if (fs.existsSync('C:\\Python314\\python.exe')) {
-    resolvedYtDlpBinary = { exe: 'C:\\Python314\\python.exe', prefixArgs: ['-m', 'yt_dlp'] };
-    return resolvedYtDlpBinary;
+  // 3. Python module fallback (python -m yt_dlp)
+  for (const pyVer of ['Python314', 'Python313', 'Python312']) {
+    const pyExe = `C:\\${pyVer}\\python.exe`;
+    if (fs.existsSync(pyExe)) {
+      resolvedYtDlpBinary = { exe: pyExe, prefixArgs: ['-m', 'yt_dlp'] };
+      return resolvedYtDlpBinary;
+    }
   }
 
-  resolvedYtDlpBinary = { exe: 'yt-dlp', prefixArgs: [] };
-  return resolvedYtDlpBinary;
+  // 4. OS PATH lookup (where.exe / which)
+  try {
+    const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+    const out = execFileSync(cmd, ['yt-dlp'], { encoding: 'utf8', timeout: 3000 }).trim();
+    const firstLine = out.split(/\r?\n/)[0]?.trim();
+    if (firstLine && fs.existsSync(firstLine)) {
+      resolvedYtDlpBinary = { exe: firstLine, prefixArgs: [] };
+      return resolvedYtDlpBinary;
+    }
+  } catch {
+    // not in PATH
+  }
+
+  return { exe: 'yt-dlp', prefixArgs: [] };
+}
+
+export function getStreamerDiagnostics() {
+  const resolved = resolveYtDlpBinary();
+  return {
+    ytDlpExe: resolved.exe,
+    prefixArgs: resolved.prefixArgs,
+    lastYtDlpError,
+  };
 }
 
 /**
@@ -99,6 +177,7 @@ async function extractWithYtDlp(videoId: string): Promise<StreamFormatInfo> {
     bitrate,
     contentLength,
     url,
+    extractor: 'yt-dlp',
   };
 }
 
@@ -148,6 +227,7 @@ async function extractWithInnerTube(videoId: string): Promise<StreamFormatInfo> 
     contentLength: selectedFormat.content_length,
     audioSampleRate: selectedFormat.audio_sample_rate,
     url: directUrl,
+    extractor: 'innertube',
   };
 }
 
@@ -160,15 +240,19 @@ export async function resolveStreamFormat(videoId: string): Promise<StreamFormat
       bitrate: cached.bitrate,
       contentLength: cached.contentLength,
       url: cached.url,
+      extractor: cached.extractor,
     };
   }
 
   let result: StreamFormatInfo;
   try {
     result = await extractWithYtDlp(videoId);
+    lastYtDlpError = null;
     console.log(`[Streamer] yt-dlp resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`);
   } catch (err: any) {
-    console.warn(`[Streamer] yt-dlp failed (${err.message}), falling back to InnerTube for ${videoId}`);
+    lastYtDlpError = err?.message || String(err);
+    resolvedYtDlpBinary = null; // Allow re-probing binary path on next attempt
+    console.warn(`[Streamer] yt-dlp failed (${lastYtDlpError}), falling back to InnerTube for ${videoId}`);
     result = await extractWithInnerTube(videoId);
   }
 
@@ -177,6 +261,7 @@ export async function resolveStreamFormat(videoId: string): Promise<StreamFormat
     mimeType: result.mimeType,
     bitrate: result.bitrate,
     contentLength: result.contentLength,
+    extractor: result.extractor,
     expiresAt: Date.now() + CACHE_TTL_MS,
   });
 
@@ -188,16 +273,47 @@ function baseMime(mime: string): string {
   return mime.split(';')[0].trim();
 }
 
+/** Parse total file size from an HTTP Content-Range header like "bytes 0-1048575/2751716" */
+function parseTotalFromContentRange(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const m = header.match(/\/(\d+)$/);
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+/** Write a ReadableStream<Uint8Array> cleanly to an Express Response with backpressure and abort safety */
+async function pumpWebStreamToRes(
+  body: ReadableStream<Uint8Array>,
+  res: Response,
+  signal: AbortSignal
+): Promise<number> {
+  const reader = body.getReader();
+  let written = 0;
+  try {
+    while (!signal.aborted && !res.destroyed) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.length > 0) {
+        if (signal.aborted || res.destroyed) break;
+        const ok = res.write(value);
+        written += value.length;
+        if (!ok && !signal.aborted && !res.destroyed) {
+          await once(res, 'drain');
+        }
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return written;
+}
+
 /**
- * Handle HTTP audio streaming with native Range support.
+ * Handle HTTP audio streaming with native Range support and bounded upstream chunks.
  *
- * Browsers stream audio by issuing HTTP Range requests:
- *   - Initial probe/play: GET with Range: bytes=0-
- *   - Seeking/scrubbing: GET with Range: bytes=X-
- *
- * We forward the Range header to the resolved high-bitrate CDN audio stream,
- * returning HTTP 206 Partial Content with proper Content-Range and Content-Length.
- * Disconnects (pause / skip) cleanly abort the upstream stream.
+ * Google Video CDN rejects open-ended `Range: bytes=0-` requests on adaptive DASH audio
+ * with HTTP 403. We transparently translate any client range (or full download) into
+ * bounded 1 MB upstream chunk fetches while returning the exact HTTP 206 / 200 contract
+ * expected by desktop Chrome, Android, and iOS Safari AVPlayer.
  */
 export async function handleAudioStream(
   req: Request,
@@ -205,7 +321,13 @@ export async function handleAudioStream(
   videoId: string
 ): Promise<void> {
   const abortController = new AbortController();
-  req.on('close', () => abortController.abort());
+
+  // Only abort when the response socket closes before finishing (safe in Node 20+)
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
 
   try {
     let format = await resolveStreamFormat(videoId);
@@ -224,67 +346,154 @@ export async function handleAudioStream(
       return;
     }
 
-    // Google Video CDN requires a Range header for DASH formats; default to 'bytes=0-' if client omitted it
-    const rangeHeader = req.headers.range || 'bytes=0-';
-
-    const fetchFromCdn = async (url: string) => {
-      const headers: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Range': rangeHeader,
-      };
+    const fetchChunkFromCdn = async (url: string, start: number, end: number) => {
       return fetch(url, {
-        headers,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          Range: `bytes=${start}-${end}`,
+        },
         signal: abortController.signal,
       });
     };
 
-    let cdnRes = await fetchFromCdn(format.url);
+    const rawRange = req.headers.range;
+    let totalLength = format.contentLength;
+    let reqStart = 0;
+    let reqEnd: number | undefined;
+    let isRangeRequest = false;
 
-    // If CDN returns 403 or 410, bust cache and retry once
-    if (cdnRes.status === 403 || cdnRes.status === 410) {
-      console.warn(`[Streamer] CDN ${cdnRes.status} for ${videoId} — re-resolving stream URL`);
-      streamCache.delete(videoId);
-      format = await resolveStreamFormat(videoId);
-      cdnRes = await fetchFromCdn(format.url);
+    if (rawRange) {
+      const match = rawRange.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        isRangeRequest = true;
+        reqStart = parseInt(match[1], 10);
+        if (match[2]) {
+          reqEnd = parseInt(match[2], 10);
+        } else if (totalLength) {
+          reqEnd = totalLength - 1;
+        }
+      }
+    } else if (totalLength) {
+      reqEnd = totalLength - 1;
     }
 
-    if (!cdnRes.ok && cdnRes.status !== 206) {
-      console.error(`[Streamer] CDN returned HTTP ${cdnRes.status} for ${videoId}`);
+    if (totalLength && reqStart >= totalLength) {
+      res.status(416)
+        .setHeader('Content-Range', `bytes */${totalLength}`)
+        .end();
+      return;
+    }
+
+    if (totalLength && reqEnd !== undefined) {
+      reqEnd = Math.min(reqEnd, totalLength - 1);
+    }
+
+    // Fetch first chunk BEFORE sending HTTP headers so 403/410 retries stay clean
+    const firstChunkEnd =
+      reqEnd !== undefined
+        ? Math.min(reqStart + CHUNK_SIZE - 1, reqEnd)
+        : reqStart + CHUNK_SIZE - 1;
+
+    let firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
+    if (firstRes.status === 403 || firstRes.status === 410) {
+      console.warn(`[Streamer] CDN ${firstRes.status} for ${videoId} — re-resolving stream URL`);
+      streamCache.delete(videoId);
+      format = await resolveStreamFormat(videoId);
+      totalLength = format.contentLength;
+      firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
+    }
+
+    if (!firstRes.ok && firstRes.status !== 206) {
+      console.error(`[Streamer] CDN returned HTTP ${firstRes.status} for ${videoId}`);
       if (!res.headersSent) {
-        res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
+        res.status(firstRes.status).json({ error: `CDN error: ${firstRes.statusText}` });
       }
       return;
     }
 
-    const status = cdnRes.status === 206 ? 206 : 200;
+    // Backfill totalLength from CDN Content-Range if extractor omitted filesize
+    const cdnTotal = parseTotalFromContentRange(firstRes.headers.get('content-range'));
+    if (cdnTotal && !totalLength) {
+      totalLength = cdnTotal;
+    }
+
+    if (totalLength) {
+      reqEnd = reqEnd !== undefined ? Math.min(reqEnd, totalLength - 1) : totalLength - 1;
+    }
+
+    const status = isRangeRequest ? 206 : 200;
     res.status(status)
       .setHeader('Content-Type', contentType)
       .setHeader('Accept-Ranges', 'bytes')
       .setHeader('Cache-Control', 'no-cache')
-      .setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
+      .setHeader(
+        'Access-Control-Expose-Headers',
+        'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+      );
 
-    const contentRange = cdnRes.headers.get('content-range');
-    if (contentRange) {
-      res.setHeader('Content-Range', contentRange);
+    if (isRangeRequest && totalLength && reqEnd !== undefined) {
+      res.setHeader('Content-Range', `bytes ${reqStart}-${reqEnd}/${totalLength}`);
+      res.setHeader('Content-Length', String(reqEnd - reqStart + 1));
+    } else if (totalLength && !isRangeRequest) {
+      res.setHeader('Content-Length', String(totalLength));
+    } else {
+      const cr = firstRes.headers.get('content-range');
+      const cl = firstRes.headers.get('content-length');
+      if (isRangeRequest && cr) res.setHeader('Content-Range', cr);
+      if (cl) res.setHeader('Content-Length', cl);
     }
 
-    const contentLength = cdnRes.headers.get('content-length');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
+    // Stream first chunk immediately
+    let offset = reqStart;
+    if (firstRes.body) {
+      const written = await pumpWebStreamToRes(firstRes.body, res, abortController.signal);
+      offset += written;
     }
 
-    if (!cdnRes.body) {
+    // Stream any remaining chunks sequentially (bounded 1 MB each)
+    const targetEnd = reqEnd;
+    while (
+      !abortController.signal.aborted &&
+      !res.destroyed &&
+      (targetEnd === undefined || offset <= targetEnd)
+    ) {
+      // Stop if CDN didn't return a full chunk and no explicit targetEnd remains
+      if (offset === reqStart) break;
+
+      const chunkEnd =
+        targetEnd !== undefined
+          ? Math.min(offset + CHUNK_SIZE - 1, targetEnd)
+          : offset + CHUNK_SIZE - 1;
+
+      if (targetEnd !== undefined && offset > targetEnd) break;
+
+      let nextRes = await fetchChunkFromCdn(format.url, offset, chunkEnd);
+      if (nextRes.status === 403 || nextRes.status === 410) {
+        streamCache.delete(videoId);
+        format = await resolveStreamFormat(videoId);
+        nextRes = await fetchChunkFromCdn(format.url, offset, chunkEnd);
+      }
+
+      if (!nextRes.ok && nextRes.status !== 206) {
+        break;
+      }
+
+      if (!nextRes.body) break;
+      const written = await pumpWebStreamToRes(nextRes.body, res, abortController.signal);
+      if (written === 0) break;
+      offset += written;
+    }
+
+    if (!res.writableEnded) {
       res.end();
-      return;
     }
-
-    // Direct byte piping into Express response
-    Readable.fromWeb(cdnRes.body as any).pipe(res);
   } catch (error: any) {
     if (error.name === 'AbortError') return;
     console.error(`[Streamer] Error streaming ${videoId}:`, error.message);
     if (!res.headersSent) {
       res.status(500).json({ error: error.message || 'Stream error' });
+    } else if (!res.writableEnded) {
+      res.end();
     }
   }
 }

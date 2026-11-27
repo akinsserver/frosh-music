@@ -15,11 +15,29 @@ function InnerShell({ children }: { children: React.ReactNode }) {
   const { isOffline } = useOffline();
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .catch((err) => console.warn('[SW] Registration failed:', err));
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const isLocalhost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    if (process.env.NODE_ENV !== 'production' || isLocalhost) {
+      // Unregister SW in development so Turbopack/HMR chunks are never served stale
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) reg.unregister();
+      });
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          for (const key of keys) {
+            if (key.startsWith('frosh-music-shell')) caches.delete(key);
+          }
+        });
+      }
+      return;
     }
+
+    navigator.serviceWorker
+      .register('/sw.js')
+      .catch((err) => console.warn('[SW] Registration failed:', err));
   }, []);
 
   return (
