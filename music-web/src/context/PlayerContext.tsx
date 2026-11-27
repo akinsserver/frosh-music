@@ -12,6 +12,7 @@ import type { Song } from '@/types/music';
 import { getStreamUrl } from '@/lib/api';
 import { getOfflineAudioUrl } from '@/lib/offlineStorage';
 import { useLibrary } from './LibraryContext';
+import { useOffline } from './OfflineContext';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
@@ -54,6 +55,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
   const { recordPlay } = useLibrary();
+  const { isDownloaded } = useOffline();
 
   const [currentTrack, setCurrentTrack] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -93,8 +95,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
+  const startAudioPlayback = useCallback((audio: HTMLAudioElement, url: string) => {
+    if (audio.src !== url) {
+      audio.src = url;
+    }
+    audio
+      .play()
+      .then(() => {
+        setIsPlaying(true);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (err.name === 'NotAllowedError') {
+          setIsPlaying(false);
+        } else if (err.name !== 'AbortError') {
+          console.error('[Player] Playback failed:', err);
+          setError('Could not start playback. Check if music-server is running.');
+          setIsPlaying(false);
+        }
+        setIsLoading(false);
+      });
+  }, []);
+
   const loadAndPlay = useCallback(
-    async (track: Song) => {
+    (track: Song) => {
       const audio = audioRef.current;
       if (!audio) return;
 
@@ -110,42 +134,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         activeObjectUrlRef.current = null;
       }
 
-      const offlineUrl = await getOfflineAudioUrl(track.id);
-      if (offlineUrl) {
-        activeObjectUrlRef.current = offlineUrl;
-        audio.src = offlineUrl;
-      } else {
+      // Synchronous path for online streams so iOS Safari preserves user-gesture activation
+      if (!isDownloaded(track.id)) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('You are offline and this track is not downloaded.');
           setIsPlaying(false);
           setIsLoading(false);
           return;
         }
-        const streamUrl = getStreamUrl(track.id);
-        if (audio.src !== streamUrl) {
-          audio.src = streamUrl;
-        }
+        startAudioPlayback(audio, getStreamUrl(track.id));
+        return;
       }
 
-      audio
-        .play()
-        .then(() => {
-          setIsPlaying(true);
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          if (err.name === 'NotAllowedError') {
-            // Autoplay blocked by browser policy until user clicks
-            setIsPlaying(false);
-          } else if (err.name !== 'AbortError') {
-            console.error('[Player] Playback failed:', err);
-            setError('Could not start playback. Check if music-server is running.');
-            setIsPlaying(false);
-          }
-          setIsLoading(false);
-        });
+      // Offline downloaded track path
+      getOfflineAudioUrl(track.id).then((offlineUrl) => {
+        if (offlineUrl) {
+          activeObjectUrlRef.current = offlineUrl;
+          startAudioPlayback(audio, offlineUrl);
+        } else {
+          startAudioPlayback(audio, getStreamUrl(track.id));
+        }
+      });
     },
-    [recordPlay]
+    [recordPlay, isDownloaded, startAudioPlayback]
   );
 
   const playTrack = useCallback(

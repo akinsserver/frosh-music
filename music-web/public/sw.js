@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frosh-music-shell-v1';
+const CACHE_NAME = 'frosh-music-shell-v2';
 const APP_SHELL = ['/', '/library', '/search', '/stats', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
