@@ -224,62 +224,121 @@ export async function handleAudioStream(
       return;
     }
 
-    // Google Video CDN requires a Range header for DASH formats; default to 'bytes=0-' if client omitted it
-    const rangeHeader = req.headers.range || 'bytes=0-';
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
+    const rawRange = req.headers.range;
 
-    const fetchFromCdn = async (url: string) => {
-      const headers: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Range': rangeHeader,
-      };
+    const fetchRangeFromCdn = async (url: string, rangeStr: string) => {
       return fetch(url, {
-        headers,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          Range: rangeStr,
+        },
         signal: abortController.signal,
       });
     };
 
-    let cdnRes = await fetchFromCdn(format.url);
-
-    // If CDN returns 403 or 410, bust cache and retry once
-    if (cdnRes.status === 403 || cdnRes.status === 410) {
-      console.warn(`[Streamer] CDN ${cdnRes.status} for ${videoId} — re-resolving stream URL`);
-      streamCache.delete(videoId);
-      format = await resolveStreamFormat(videoId);
-      cdnRes = await fetchFromCdn(format.url);
-    }
-
-    if (!cdnRes.ok && cdnRes.status !== 206) {
-      console.error(`[Streamer] CDN returned HTTP ${cdnRes.status} for ${videoId}`);
-      if (!res.headersSent) {
-        res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
+    // ── Case 1: Client sent a Range header (standard HTML5 <audio> streaming/seeking) ──
+    if (rawRange) {
+      const match = rawRange.match(/bytes=(\d+)-(\d*)/);
+      let upstreamRange = rawRange;
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const explicitEnd = match[2] ? parseInt(match[2], 10) : null;
+        if (explicitEnd !== null) {
+          // Cap overly huge explicit ranges to 2 MB so CDN never throttles/rejects
+          const cappedEnd = Math.min(explicitEnd, start + 2 * CHUNK_SIZE - 1);
+          upstreamRange = `bytes=${start}-${cappedEnd}`;
+        } else {
+          const chunkEnd = format.contentLength
+            ? Math.min(start + CHUNK_SIZE - 1, format.contentLength - 1)
+            : start + CHUNK_SIZE - 1;
+          upstreamRange = `bytes=${start}-${chunkEnd}`;
+        }
       }
+
+      let cdnRes = await fetchRangeFromCdn(format.url, upstreamRange);
+
+      if (cdnRes.status === 403 || cdnRes.status === 410) {
+        console.warn(`[Streamer] CDN ${cdnRes.status} for ${videoId} (${upstreamRange}) — re-resolving`);
+        streamCache.delete(videoId);
+        format = await resolveStreamFormat(videoId);
+        cdnRes = await fetchRangeFromCdn(format.url, upstreamRange);
+      }
+
+      if (!cdnRes.ok && cdnRes.status !== 206) {
+        console.error(`[Streamer] CDN returned HTTP ${cdnRes.status} for ${videoId}`);
+        if (!res.headersSent) {
+          res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
+        }
+        return;
+      }
+
+      const status = cdnRes.status === 206 ? 206 : 200;
+      res.status(status)
+        .setHeader('Content-Type', contentType)
+        .setHeader('Accept-Ranges', 'bytes')
+        .setHeader('Cache-Control', 'no-cache')
+        .setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
+
+      const contentRange = cdnRes.headers.get('content-range');
+      if (contentRange) res.setHeader('Content-Range', contentRange);
+
+      const contentLength = cdnRes.headers.get('content-length');
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+
+      if (!cdnRes.body) {
+        res.end();
+        return;
+      }
+
+      Readable.fromWeb(cdnRes.body as any).pipe(res);
       return;
     }
 
-    const status = cdnRes.status === 206 ? 206 : 200;
-    res.status(status)
+    // ── Case 2: No Range header (full file fetch / offline download) ──
+    const totalLength = format.contentLength;
+    res.status(200)
       .setHeader('Content-Type', contentType)
       .setHeader('Accept-Ranges', 'bytes')
       .setHeader('Cache-Control', 'no-cache')
       .setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
-
-    const contentRange = cdnRes.headers.get('content-range');
-    if (contentRange) {
-      res.setHeader('Content-Range', contentRange);
+    if (totalLength) {
+      res.setHeader('Content-Length', String(totalLength));
     }
 
-    const contentLength = cdnRes.headers.get('content-length');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
+    let offset = 0;
+    while (!abortController.signal.aborted) {
+      const end = totalLength
+        ? Math.min(offset + CHUNK_SIZE - 1, totalLength - 1)
+        : offset + CHUNK_SIZE - 1;
+      const chunkRange = `bytes=${offset}-${end}`;
 
-    if (!cdnRes.body) {
-      res.end();
-      return;
-    }
+      let cdnRes = await fetchRangeFromCdn(format.url, chunkRange);
+      if (cdnRes.status === 403 || cdnRes.status === 410) {
+        streamCache.delete(videoId);
+        format = await resolveStreamFormat(videoId);
+        cdnRes = await fetchRangeFromCdn(format.url, chunkRange);
+      }
 
-    // Direct byte piping into Express response
-    Readable.fromWeb(cdnRes.body as any).pipe(res);
+      if (!cdnRes.ok && cdnRes.status !== 206) {
+        if (offset === 0 && !res.headersSent) {
+          res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
+          return;
+        }
+        break;
+      }
+
+      const buf = Buffer.from(await cdnRes.arrayBuffer());
+      if (abortController.signal.aborted) break;
+      if (buf.length === 0) break;
+
+      res.write(buf);
+      offset += buf.length;
+
+      if (totalLength && offset >= totalLength) break;
+      if (buf.length < end - (offset - buf.length) + 1) break;
+    }
+    res.end();
   } catch (error: any) {
     if (error.name === 'AbortError') return;
     console.error(`[Streamer] Error streaming ${videoId}:`, error.message);
