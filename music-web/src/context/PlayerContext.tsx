@@ -301,13 +301,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex((prevIdx) => (index < prevIdx ? prevIdx - 1 : prevIdx));
   }, []);
 
-  // Initialize hidden <audio> element once
+  // Attach listeners to DOM-mounted <audio> element once
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.setAttribute('playsinline', '');
+    const audio = audioRef.current;
+    if (!audio) return;
     audio.volume = 0.85;
-    audioRef.current = audio;
 
     const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
     const onDurationChange = () => {
@@ -375,14 +373,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         : [],
     });
 
-    navigator.mediaSession.setActionHandler('play', togglePlay);
-    navigator.mediaSession.setActionHandler('pause', togglePlay);
+    navigator.mediaSession.setActionHandler('play', () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        setIsPlaying(false);
+      }
+    });
     navigator.mediaSession.setActionHandler('nexttrack', nextTrack);
     navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime !== undefined) seek(details.seekTime);
     });
-  }, [currentTrack, togglePlay, nextTrack, prevTrack, seek]);
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      const audio = audioRef.current;
+      if (audio) seek(Math.max(0, audio.currentTime - (details.seekOffset || 10)));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      const audio = audioRef.current;
+      if (audio) seek(Math.min(audio.duration || 0, audio.currentTime + (details.seekOffset || 10)));
+    });
+  }, [currentTrack, nextTrack, prevTrack, seek]);
+
+  // Keep OS Lock Screen playback state & scrubber synchronized (essential for iOS background audio)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (
+      typeof navigator === 'undefined' ||
+      !('mediaSession' in navigator) ||
+      typeof navigator.mediaSession.setPositionState !== 'function' ||
+      !currentTrack ||
+      !duration ||
+      duration <= 0
+    ) {
+      return;
+    }
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.max(0, Math.min(currentTime, duration)),
+      });
+    } catch {
+      // Ignore transient duration/position mismatches
+    }
+  }, [currentTrack, currentTime, duration]);
 
   // Global keyboard shortcuts (Desktop + Media Keys)
   useEffect(() => {
@@ -454,6 +499,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setShowQueue,
       }}
     >
+      <audio ref={audioRef} preload="auto" playsInline className="hidden" />
       {children}
     </PlayerContext.Provider>
   );

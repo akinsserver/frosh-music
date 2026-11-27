@@ -1,5 +1,5 @@
 import type { Response, Request } from 'express';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
@@ -14,6 +14,7 @@ interface CachedFormat {
   mimeType: string;
   bitrate: number;
   contentLength?: number;
+  extractor?: 'yt-dlp' | 'innertube';
   expiresAt: number;
 }
 
@@ -23,6 +24,27 @@ const CACHE_TTL_MS = 90 * 60 * 1000;
 const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
 
 let resolvedYtDlpBinary: { exe: string; prefixArgs: string[] } | null = null;
+let lastYtDlpError: string | null = null;
+
+function findExeInDir(dir: string, targetName: string, maxDepth = 2): string | null {
+  if (!dir || maxDepth < 0 || !fs.existsSync(dir)) return null;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name.toLowerCase() === targetName.toLowerCase()) {
+        return fullPath;
+      }
+      if (entry.isDirectory() && maxDepth > 0) {
+        const nested = findExeInDir(fullPath, targetName, maxDepth - 1);
+        if (nested) return nested;
+      }
+    }
+  } catch {
+    // ignore permission errors
+  }
+  return null;
+}
 
 function resolveYtDlpBinary(): { exe: string; prefixArgs: string[] } {
   if (resolvedYtDlpBinary) return resolvedYtDlpBinary;
@@ -36,31 +58,86 @@ function resolveYtDlpBinary(): { exe: string; prefixArgs: string[] } {
   const appData = process.env.APPDATA || '';
   const localAppData = process.env.LOCALAPPDATA || '';
 
+  // 1. Scan WinGet Packages directly (avoids WinGet\Links App Execution Alias quirks)
+  const wingetDirs = [
+    path.join(localAppData, 'Microsoft', 'WinGet', 'Packages'),
+    path.join(userProfile, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Packages'),
+    'C:\\Program Files\\WinGet\\Packages',
+  ];
+  for (const pkgRoot of wingetDirs) {
+    if (fs.existsSync(pkgRoot)) {
+      try {
+        for (const folder of fs.readdirSync(pkgRoot)) {
+          if (folder.toLowerCase().includes('yt-dlp')) {
+            const found = findExeInDir(path.join(pkgRoot, folder), 'yt-dlp.exe', 2);
+            if (found) {
+              resolvedYtDlpBinary = { exe: found, prefixArgs: [] };
+              return resolvedYtDlpBinary;
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // 2. Direct candidate paths (WinGet Links, Scoop, Chocolatey, Python Scripts)
   const candidates = [
     path.join(localAppData, 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
-    path.join(localAppData, 'Microsoft', 'WindowsApps', 'yt-dlp.exe'),
     path.join(userProfile, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
-    path.join(appData, 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    path.join(userProfile, 'AppData', 'Roaming', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    path.join(localAppData, 'Programs', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
-    'yt-dlp.exe',
-    'yt-dlp',
+    path.join(localAppData, 'Microsoft', 'WindowsApps', 'yt-dlp.exe'),
+    path.join(userProfile, 'scoop', 'shims', 'yt-dlp.exe'),
+    'C:\\ProgramData\\chocolatey\\bin\\yt-dlp.exe',
   ];
+  for (const pyVer of ['Python315', 'Python314', 'Python313', 'Python312', 'Python311', 'Python310']) {
+    candidates.push(
+      path.join(appData, 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      path.join(userProfile, 'AppData', 'Roaming', 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      path.join(localAppData, 'Programs', 'Python', pyVer, 'Scripts', 'yt-dlp.exe'),
+      `C:\\${pyVer}\\Scripts\\yt-dlp.exe`
+    );
+  }
 
   for (const cand of candidates) {
-    if (cand.includes(path.sep) && fs.existsSync(cand)) {
+    if (cand && fs.existsSync(cand)) {
       resolvedYtDlpBinary = { exe: cand, prefixArgs: [] };
       return resolvedYtDlpBinary;
     }
   }
 
-  if (fs.existsSync('C:\\Python314\\python.exe')) {
-    resolvedYtDlpBinary = { exe: 'C:\\Python314\\python.exe', prefixArgs: ['-m', 'yt_dlp'] };
-    return resolvedYtDlpBinary;
+  // 3. Python module fallback (python -m yt_dlp)
+  for (const pyVer of ['Python314', 'Python313', 'Python312']) {
+    const pyExe = `C:\\${pyVer}\\python.exe`;
+    if (fs.existsSync(pyExe)) {
+      resolvedYtDlpBinary = { exe: pyExe, prefixArgs: ['-m', 'yt_dlp'] };
+      return resolvedYtDlpBinary;
+    }
   }
 
-  resolvedYtDlpBinary = { exe: 'yt-dlp', prefixArgs: [] };
-  return resolvedYtDlpBinary;
+  // 4. OS PATH lookup (where.exe / which)
+  try {
+    const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+    const out = execFileSync(cmd, ['yt-dlp'], { encoding: 'utf8', timeout: 3000 }).trim();
+    const firstLine = out.split(/\r?\n/)[0]?.trim();
+    if (firstLine && fs.existsSync(firstLine)) {
+      resolvedYtDlpBinary = { exe: firstLine, prefixArgs: [] };
+      return resolvedYtDlpBinary;
+    }
+  } catch {
+    // not in PATH
+  }
+
+  return { exe: 'yt-dlp', prefixArgs: [] };
+}
+
+export function getStreamerDiagnostics() {
+  const resolved = resolveYtDlpBinary();
+  return {
+    ytDlpExe: resolved.exe,
+    prefixArgs: resolved.prefixArgs,
+    lastYtDlpError,
+  };
 }
 
 /**
@@ -100,6 +177,7 @@ async function extractWithYtDlp(videoId: string): Promise<StreamFormatInfo> {
     bitrate,
     contentLength,
     url,
+    extractor: 'yt-dlp',
   };
 }
 
@@ -149,6 +227,7 @@ async function extractWithInnerTube(videoId: string): Promise<StreamFormatInfo> 
     contentLength: selectedFormat.content_length,
     audioSampleRate: selectedFormat.audio_sample_rate,
     url: directUrl,
+    extractor: 'innertube',
   };
 }
 
@@ -161,15 +240,19 @@ export async function resolveStreamFormat(videoId: string): Promise<StreamFormat
       bitrate: cached.bitrate,
       contentLength: cached.contentLength,
       url: cached.url,
+      extractor: cached.extractor,
     };
   }
 
   let result: StreamFormatInfo;
   try {
     result = await extractWithYtDlp(videoId);
+    lastYtDlpError = null;
     console.log(`[Streamer] yt-dlp resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`);
   } catch (err: any) {
-    console.warn(`[Streamer] yt-dlp failed (${err.message}), falling back to InnerTube for ${videoId}`);
+    lastYtDlpError = err?.message || String(err);
+    resolvedYtDlpBinary = null; // Allow re-probing binary path on next attempt
+    console.warn(`[Streamer] yt-dlp failed (${lastYtDlpError}), falling back to InnerTube for ${videoId}`);
     result = await extractWithInnerTube(videoId);
   }
 
@@ -178,6 +261,7 @@ export async function resolveStreamFormat(videoId: string): Promise<StreamFormat
     mimeType: result.mimeType,
     bitrate: result.bitrate,
     contentLength: result.contentLength,
+    extractor: result.extractor,
     expiresAt: Date.now() + CACHE_TTL_MS,
   });
 
