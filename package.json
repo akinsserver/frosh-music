@@ -1,0 +1,11 @@
+{
+  "name": "frosh-music",
+  "version": "1.0.0",
+  "description": "Vyla Music Workspace",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "dev:server": "npm --prefix music-server run dev",
+    "dev:web": "npm --prefix music-web run dev",
+    "build": "npm --prefix music-server run build && npm --prefix music-web run build"
+  }
+}
