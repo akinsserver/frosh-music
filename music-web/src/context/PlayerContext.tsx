@@ -121,10 +121,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setIsLoading(false);
           return;
         }
-        audio.src = getStreamUrl(track.id);
+        const streamUrl = getStreamUrl(track.id);
+        if (audio.src !== streamUrl) {
+          audio.src = streamUrl;
+        }
       }
 
-      audio.load();
       audio
         .play()
         .then(() => {
@@ -132,7 +134,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setIsLoading(false);
         })
         .catch((err) => {
-          if (err.name !== 'AbortError') {
+          if (err.name === 'NotAllowedError') {
+            // Autoplay blocked by browser policy until user clicks
+            setIsPlaying(false);
+          } else if (err.name !== 'AbortError') {
             console.error('[Player] Playback failed:', err);
             setError('Could not start playback. Check if music-server is running.');
             setIsPlaying(false);

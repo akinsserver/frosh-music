@@ -36,6 +36,9 @@ function resolveYtDlpBinary(): { exe: string; prefixArgs: string[] } {
   const localAppData = process.env.LOCALAPPDATA || '';
 
   const candidates = [
+    path.join(localAppData, 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
+    path.join(localAppData, 'Microsoft', 'WindowsApps', 'yt-dlp.exe'),
+    path.join(userProfile, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
     path.join(appData, 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
     path.join(userProfile, 'AppData', 'Roaming', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
     path.join(localAppData, 'Programs', 'Python', 'Python314', 'Scripts', 'yt-dlp.exe'),
@@ -221,15 +224,14 @@ export async function handleAudioStream(
       return;
     }
 
-    const rangeHeader = req.headers.range;
+    // Google Video CDN requires a Range header for DASH formats; default to 'bytes=0-' if client omitted it
+    const rangeHeader = req.headers.range || 'bytes=0-';
 
     const fetchFromCdn = async (url: string) => {
       const headers: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Range': rangeHeader,
       };
-      if (rangeHeader) {
-        headers['Range'] = rangeHeader;
-      }
       return fetch(url, {
         headers,
         signal: abortController.signal,
