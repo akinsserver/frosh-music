@@ -38,7 +38,20 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   }
 });
 
-// Health check endpoint
+// Root and Health check endpoints
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'frosh-music-server',
+    message: 'Frosh Music Backend is running',
+    endpoints: {
+      health: '/api/health',
+      home: '/api/home',
+      search: '/api/search?q=...'
+    }
+  });
+});
+
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
