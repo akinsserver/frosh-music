@@ -61,8 +61,8 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
         {/* Brand */}
         <div className="px-6 py-5 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 group" data-focusable="true">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <Radio className="w-5 h-5 text-zinc-950 stroke-[2.5]" />
+            <div className="w-9 h-9 rounded-xl overflow-hidden bg-zinc-900 border border-emerald-500/30 flex items-center justify-center shadow-lg shadow-emerald-500/15 group-hover:border-emerald-400 transition-colors shrink-0">
+              <img src="/icon.svg" alt="FM" className="w-full h-full object-cover" />
             </div>
             <div>
               <span className="text-lg font-bold tracking-tight text-white">Frosh</span>
