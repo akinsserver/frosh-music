@@ -305,6 +305,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const audio = new Audio();
     audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
     audio.volume = 0.85;
     audioRef.current = audio;
 
@@ -325,8 +326,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const onError = () => {
       setIsLoading(false);
       setIsPlaying(false);
+      const mediaErr = audio.error;
+      if (mediaErr?.code === 1) return; // Ignore benign track-switch aborts
       if (audio.src) {
-        setError('Stream interrupted or unavailable.');
+        const detail = mediaErr?.message || (mediaErr?.code ? `code ${mediaErr.code}` : '');
+        console.error('[Player] Media error:', mediaErr?.code, mediaErr?.message, audio.src);
+        setError(detail ? `Stream unavailable (${detail}).` : 'Stream interrupted or unavailable.');
       }
     };
 

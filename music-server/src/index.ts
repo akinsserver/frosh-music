@@ -107,3 +107,18 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
+// Prevent client disconnects / stream aborts from crashing the server process
+process.on('uncaughtException', (err: any) => {
+  if (err?.name === 'AbortError' || err?.code === 'ECONNRESET' || err?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+    return;
+  }
+  console.error('[Process] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  if (reason?.name === 'AbortError' || reason?.code === 'ECONNRESET') {
+    return;
+  }
+  console.error('[Process] Unhandled Rejection:', reason);
+});

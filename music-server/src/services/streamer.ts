@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { Readable } from 'stream';
+import { once } from 'events';
 import { getInnertube } from './innertube.js';
 import type { StreamFormatInfo } from '../types/index.js';
 
@@ -20,6 +20,7 @@ interface CachedFormat {
 // Cache TTL: 90 minutes (CDN URLs last ~6 hours)
 const streamCache = new Map<string, CachedFormat>();
 const CACHE_TTL_MS = 90 * 60 * 1000;
+const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
 
 let resolvedYtDlpBinary: { exe: string; prefixArgs: string[] } | null = null;
 
@@ -188,16 +189,47 @@ function baseMime(mime: string): string {
   return mime.split(';')[0].trim();
 }
 
+/** Parse total file size from an HTTP Content-Range header like "bytes 0-1048575/2751716" */
+function parseTotalFromContentRange(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const m = header.match(/\/(\d+)$/);
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+/** Write a ReadableStream<Uint8Array> cleanly to an Express Response with backpressure and abort safety */
+async function pumpWebStreamToRes(
+  body: ReadableStream<Uint8Array>,
+  res: Response,
+  signal: AbortSignal
+): Promise<number> {
+  const reader = body.getReader();
+  let written = 0;
+  try {
+    while (!signal.aborted && !res.destroyed) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.length > 0) {
+        if (signal.aborted || res.destroyed) break;
+        const ok = res.write(value);
+        written += value.length;
+        if (!ok && !signal.aborted && !res.destroyed) {
+          await once(res, 'drain');
+        }
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return written;
+}
+
 /**
- * Handle HTTP audio streaming with native Range support.
+ * Handle HTTP audio streaming with native Range support and bounded upstream chunks.
  *
- * Browsers stream audio by issuing HTTP Range requests:
- *   - Initial probe/play: GET with Range: bytes=0-
- *   - Seeking/scrubbing: GET with Range: bytes=X-
- *
- * We forward the Range header to the resolved high-bitrate CDN audio stream,
- * returning HTTP 206 Partial Content with proper Content-Range and Content-Length.
- * Disconnects (pause / skip) cleanly abort the upstream stream.
+ * Google Video CDN rejects open-ended `Range: bytes=0-` requests on adaptive DASH audio
+ * with HTTP 403. We transparently translate any client range (or full download) into
+ * bounded 1 MB upstream chunk fetches while returning the exact HTTP 206 / 200 contract
+ * expected by desktop Chrome, Android, and iOS Safari AVPlayer.
  */
 export async function handleAudioStream(
   req: Request,
@@ -205,7 +237,13 @@ export async function handleAudioStream(
   videoId: string
 ): Promise<void> {
   const abortController = new AbortController();
-  req.on('close', () => abortController.abort());
+
+  // Only abort when the response socket closes before finishing (safe in Node 20+)
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
 
   try {
     let format = await resolveStreamFormat(videoId);
@@ -224,126 +262,154 @@ export async function handleAudioStream(
       return;
     }
 
-    const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
-    const rawRange = req.headers.range;
-
-    const fetchRangeFromCdn = async (url: string, rangeStr: string) => {
+    const fetchChunkFromCdn = async (url: string, start: number, end: number) => {
       return fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          Range: rangeStr,
+          Range: `bytes=${start}-${end}`,
         },
         signal: abortController.signal,
       });
     };
 
-    // ── Case 1: Client sent a Range header (standard HTML5 <audio> streaming/seeking) ──
+    const rawRange = req.headers.range;
+    let totalLength = format.contentLength;
+    let reqStart = 0;
+    let reqEnd: number | undefined;
+    let isRangeRequest = false;
+
     if (rawRange) {
       const match = rawRange.match(/bytes=(\d+)-(\d*)/);
-      let upstreamRange = rawRange;
       if (match) {
-        const start = parseInt(match[1], 10);
-        const explicitEnd = match[2] ? parseInt(match[2], 10) : null;
-        if (explicitEnd !== null) {
-          // Cap overly huge explicit ranges to 2 MB so CDN never throttles/rejects
-          const cappedEnd = Math.min(explicitEnd, start + 2 * CHUNK_SIZE - 1);
-          upstreamRange = `bytes=${start}-${cappedEnd}`;
-        } else {
-          const chunkEnd = format.contentLength
-            ? Math.min(start + CHUNK_SIZE - 1, format.contentLength - 1)
-            : start + CHUNK_SIZE - 1;
-          upstreamRange = `bytes=${start}-${chunkEnd}`;
+        isRangeRequest = true;
+        reqStart = parseInt(match[1], 10);
+        if (match[2]) {
+          reqEnd = parseInt(match[2], 10);
+        } else if (totalLength) {
+          reqEnd = totalLength - 1;
         }
       }
+    } else if (totalLength) {
+      reqEnd = totalLength - 1;
+    }
 
-      let cdnRes = await fetchRangeFromCdn(format.url, upstreamRange);
-
-      if (cdnRes.status === 403 || cdnRes.status === 410) {
-        console.warn(`[Streamer] CDN ${cdnRes.status} for ${videoId} (${upstreamRange}) — re-resolving`);
-        streamCache.delete(videoId);
-        format = await resolveStreamFormat(videoId);
-        cdnRes = await fetchRangeFromCdn(format.url, upstreamRange);
-      }
-
-      if (!cdnRes.ok && cdnRes.status !== 206) {
-        console.error(`[Streamer] CDN returned HTTP ${cdnRes.status} for ${videoId}`);
-        if (!res.headersSent) {
-          res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
-        }
-        return;
-      }
-
-      const status = cdnRes.status === 206 ? 206 : 200;
-      res.status(status)
-        .setHeader('Content-Type', contentType)
-        .setHeader('Accept-Ranges', 'bytes')
-        .setHeader('Cache-Control', 'no-cache')
-        .setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
-
-      const contentRange = cdnRes.headers.get('content-range');
-      if (contentRange) res.setHeader('Content-Range', contentRange);
-
-      const contentLength = cdnRes.headers.get('content-length');
-      if (contentLength) res.setHeader('Content-Length', contentLength);
-
-      if (!cdnRes.body) {
-        res.end();
-        return;
-      }
-
-      Readable.fromWeb(cdnRes.body as any).pipe(res);
+    if (totalLength && reqStart >= totalLength) {
+      res.status(416)
+        .setHeader('Content-Range', `bytes */${totalLength}`)
+        .end();
       return;
     }
 
-    // ── Case 2: No Range header (full file fetch / offline download) ──
-    const totalLength = format.contentLength;
-    res.status(200)
+    if (totalLength && reqEnd !== undefined) {
+      reqEnd = Math.min(reqEnd, totalLength - 1);
+    }
+
+    // Fetch first chunk BEFORE sending HTTP headers so 403/410 retries stay clean
+    const firstChunkEnd =
+      reqEnd !== undefined
+        ? Math.min(reqStart + CHUNK_SIZE - 1, reqEnd)
+        : reqStart + CHUNK_SIZE - 1;
+
+    let firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
+    if (firstRes.status === 403 || firstRes.status === 410) {
+      console.warn(`[Streamer] CDN ${firstRes.status} for ${videoId} — re-resolving stream URL`);
+      streamCache.delete(videoId);
+      format = await resolveStreamFormat(videoId);
+      totalLength = format.contentLength;
+      firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
+    }
+
+    if (!firstRes.ok && firstRes.status !== 206) {
+      console.error(`[Streamer] CDN returned HTTP ${firstRes.status} for ${videoId}`);
+      if (!res.headersSent) {
+        res.status(firstRes.status).json({ error: `CDN error: ${firstRes.statusText}` });
+      }
+      return;
+    }
+
+    // Backfill totalLength from CDN Content-Range if extractor omitted filesize
+    const cdnTotal = parseTotalFromContentRange(firstRes.headers.get('content-range'));
+    if (cdnTotal && !totalLength) {
+      totalLength = cdnTotal;
+    }
+
+    if (totalLength) {
+      reqEnd = reqEnd !== undefined ? Math.min(reqEnd, totalLength - 1) : totalLength - 1;
+    }
+
+    const status = isRangeRequest ? 206 : 200;
+    res.status(status)
       .setHeader('Content-Type', contentType)
       .setHeader('Accept-Ranges', 'bytes')
       .setHeader('Cache-Control', 'no-cache')
-      .setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
-    if (totalLength) {
+      .setHeader(
+        'Access-Control-Expose-Headers',
+        'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+      );
+
+    if (isRangeRequest && totalLength && reqEnd !== undefined) {
+      res.setHeader('Content-Range', `bytes ${reqStart}-${reqEnd}/${totalLength}`);
+      res.setHeader('Content-Length', String(reqEnd - reqStart + 1));
+    } else if (totalLength && !isRangeRequest) {
       res.setHeader('Content-Length', String(totalLength));
+    } else {
+      const cr = firstRes.headers.get('content-range');
+      const cl = firstRes.headers.get('content-length');
+      if (isRangeRequest && cr) res.setHeader('Content-Range', cr);
+      if (cl) res.setHeader('Content-Length', cl);
     }
 
-    let offset = 0;
-    while (!abortController.signal.aborted) {
-      const end = totalLength
-        ? Math.min(offset + CHUNK_SIZE - 1, totalLength - 1)
-        : offset + CHUNK_SIZE - 1;
-      const chunkRange = `bytes=${offset}-${end}`;
+    // Stream first chunk immediately
+    let offset = reqStart;
+    if (firstRes.body) {
+      const written = await pumpWebStreamToRes(firstRes.body, res, abortController.signal);
+      offset += written;
+    }
 
-      let cdnRes = await fetchRangeFromCdn(format.url, chunkRange);
-      if (cdnRes.status === 403 || cdnRes.status === 410) {
+    // Stream any remaining chunks sequentially (bounded 1 MB each)
+    const targetEnd = reqEnd;
+    while (
+      !abortController.signal.aborted &&
+      !res.destroyed &&
+      (targetEnd === undefined || offset <= targetEnd)
+    ) {
+      // Stop if CDN didn't return a full chunk and no explicit targetEnd remains
+      if (offset === reqStart) break;
+
+      const chunkEnd =
+        targetEnd !== undefined
+          ? Math.min(offset + CHUNK_SIZE - 1, targetEnd)
+          : offset + CHUNK_SIZE - 1;
+
+      if (targetEnd !== undefined && offset > targetEnd) break;
+
+      let nextRes = await fetchChunkFromCdn(format.url, offset, chunkEnd);
+      if (nextRes.status === 403 || nextRes.status === 410) {
         streamCache.delete(videoId);
         format = await resolveStreamFormat(videoId);
-        cdnRes = await fetchRangeFromCdn(format.url, chunkRange);
+        nextRes = await fetchChunkFromCdn(format.url, offset, chunkEnd);
       }
 
-      if (!cdnRes.ok && cdnRes.status !== 206) {
-        if (offset === 0 && !res.headersSent) {
-          res.status(cdnRes.status).json({ error: `CDN error: ${cdnRes.statusText}` });
-          return;
-        }
+      if (!nextRes.ok && nextRes.status !== 206) {
         break;
       }
 
-      const buf = Buffer.from(await cdnRes.arrayBuffer());
-      if (abortController.signal.aborted) break;
-      if (buf.length === 0) break;
-
-      res.write(buf);
-      offset += buf.length;
-
-      if (totalLength && offset >= totalLength) break;
-      if (buf.length < end - (offset - buf.length) + 1) break;
+      if (!nextRes.body) break;
+      const written = await pumpWebStreamToRes(nextRes.body, res, abortController.signal);
+      if (written === 0) break;
+      offset += written;
     }
-    res.end();
+
+    if (!res.writableEnded) {
+      res.end();
+    }
   } catch (error: any) {
     if (error.name === 'AbortError') return;
     console.error(`[Streamer] Error streaming ${videoId}:`, error.message);
     if (!res.headersSent) {
       res.status(500).json({ error: error.message || 'Stream error' });
+    } else if (!res.writableEnded) {
+      res.end();
     }
   }
 }
