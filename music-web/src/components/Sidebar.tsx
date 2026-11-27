@@ -15,29 +15,11 @@ import {
   Tv,
 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
-import { checkServerHealth } from '@/lib/api';
-
 export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleTV: () => void }) {
   const pathname = usePathname();
   const { playlists, likedSongs, createPlaylist } = useLibrary();
-  const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
-
-  useEffect(() => {
-    let mounted = true;
-    const check = () => {
-      checkServerHealth()
-        .then(() => mounted && setServerOnline(true))
-        .catch(() => mounted && setServerOnline(false));
-    };
-    check();
-    const timer = setInterval(check, 20000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, []);
 
   const handleCreatePlaylist = (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,28 +149,6 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
                 </div>
               </Link>
             ))}
-          </div>
-        </div>
-
-        {/* Mini PC Server Status */}
-        <div className="p-4 border-t border-white/5">
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-zinc-900/70 border border-white/5">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                serverOnline === true
-                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-                  : serverOnline === false
-                  ? 'bg-red-500'
-                  : 'bg-amber-400 animate-pulse'
-              }`}
-            />
-            <span className="text-xs text-zinc-400 truncate">
-              {serverOnline === true
-                ? 'Stream Server Online'
-                : serverOnline === false
-                ? 'Server Offline (:4000)'
-                : 'Connecting...'}
-            </span>
           </div>
         </div>
       </aside>

@@ -40,24 +40,14 @@ export default function HomePage() {
     };
   }, []);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  };
-
   return (
     <div className="space-y-8">
-      {/* Top Bar / Greeting */}
+      {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            {getGreeting()}
+            Home
           </h1>
-          <p className="text-sm text-zinc-400 mt-0.5">
-            Stream high-bitrate audio directly from your Frosh Mini PC
-          </p>
         </div>
 
         <Link
