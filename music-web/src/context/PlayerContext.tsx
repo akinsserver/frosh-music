@@ -44,6 +44,7 @@ interface PlayerContextValue {
   addToQueue: (track: Song) => void;
   playNext: (track: Song) => void;
   removeFromQueue: (index: number) => void;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
   setIsFullScreen: (open: boolean) => void;
   setShowLyrics: (open: boolean) => void;
   setShowQueue: (open: boolean) => void;
@@ -307,6 +308,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex((prevIdx) => (index < prevIdx ? prevIdx - 1 : prevIdx));
   }, []);
 
+  const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setQueue((prevQueue) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= prevQueue.length ||
+        toIndex < 0 ||
+        toIndex >= prevQueue.length
+      ) {
+        return prevQueue;
+      }
+      const newQueue = [...prevQueue];
+      const [moved] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, moved);
+
+      setQueueIndex((currentIdx) => {
+        if (currentIdx === fromIndex) {
+          return toIndex;
+        }
+        if (fromIndex < currentIdx && toIndex >= currentIdx) {
+          return currentIdx - 1;
+        }
+        if (fromIndex > currentIdx && toIndex <= currentIdx) {
+          return currentIdx + 1;
+        }
+        return currentIdx;
+      });
+
+      return newQueue;
+    });
+  }, []);
+
   // Attach listeners to DOM-mounted <audio> element once
   useEffect(() => {
     const audio = audioRef.current;
@@ -559,6 +592,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         addToQueue,
         playNext,
         removeFromQueue,
+        reorderQueue,
         setIsFullScreen,
         setShowLyrics,
         setShowQueue,

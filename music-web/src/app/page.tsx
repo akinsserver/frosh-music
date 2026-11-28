@@ -28,11 +28,21 @@ import {
 } from '@/lib/recommendations';
 import { SongBoxCard } from '@/components/SongBoxCard';
 import { ShelfCarousel } from '@/components/ShelfCarousel';
+import { SettingsModal } from '@/components/SettingsModal';
+import { getAvatarById } from '@/lib/avatars';
+import { createClient } from '@/lib/supabase';
 
 export default function HomePage() {
+  const [supabase] = useState(() => createClient());
   const [shelves, setShelves] = useState<HomeShelf[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ name: string; avatarId: string }>({
+    name: '',
+    avatarId: 'neon-beats',
+  });
 
   const [personalizedRecs, setPersonalizedRecs] = useState<RecommendationResult | null>(null);
   const [communitySongs, setCommunitySongs] = useState<Song[]>([]);
@@ -40,6 +50,32 @@ export default function HomePage() {
   const [genreTrending, setGenreTrending] = useState<{ genre: string; songs: Song[] } | null>(null);
 
   const { history, likedSongs, playEvents } = useLibrary();
+
+  // Load user profile for top-right avatar
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('vyla_user_profile');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setUserProfile({
+          name: parsed.display_name || '',
+          avatarId: parsed.avatar_id || 'neon-beats',
+        });
+      }
+    } catch {}
+
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data?.user;
+      if (user) {
+        const metaName = user.user_metadata?.display_name || user.user_metadata?.full_name || '';
+        const metaAvatar = user.user_metadata?.avatar_id || 'neon-beats';
+        setUserProfile({ name: metaName, avatarId: metaAvatar });
+      }
+    });
+  }, [supabase]);
+
+  const userAvatar = getAvatarById(userProfile.avatarId);
 
   // 1. Fetch server home shelves
   useEffect(() => {
@@ -129,19 +165,38 @@ export default function HomePage() {
   return (
     <div className="space-y-8 pb-8">
       {/* Top Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">Home</h1>
         </div>
 
-        <Link
-          href="/search"
-          data-focusable="true"
-          className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 text-sm text-zinc-200 transition-all w-full sm:w-auto"
-        >
-          <Search className="w-4 h-4 text-emerald-400" />
-          <span>Search songs, albums, artists...</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/search"
+            data-focusable="true"
+            className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 text-sm text-zinc-200 transition-all"
+          >
+            <Search className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Search songs, albums, artists...</span>
+            <span className="sm:hidden">Search</span>
+          </Link>
+
+          {/* Top-Right Avatar Button (Click to open Settings) */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            data-focusable="true"
+            className="relative flex items-center justify-center p-0.5 rounded-2xl ring-2 ring-emerald-500/40 hover:ring-emerald-400 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/10 cursor-pointer shrink-0"
+            title={userProfile.name ? `${userProfile.name} (Settings)` : 'Settings & Profile'}
+            aria-label="Settings and Profile"
+          >
+            <div
+              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${userAvatar.gradient} flex items-center justify-center text-lg sm:text-xl shadow-inner border border-white/20`}
+            >
+              {userAvatar.emoji}
+            </div>
+          </button>
+        </div>
       </div>
 
       {/* 1. Continue Listening (Swipeable Horizontal Box Form) */}
@@ -337,6 +392,13 @@ export default function HomePage() {
             </ShelfCarousel>
           );
         })}
+
+      {/* Settings & Profile Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onProfileUpdated={(updated) => setUserProfile(updated)}
+      />
     </div>
   );
 }

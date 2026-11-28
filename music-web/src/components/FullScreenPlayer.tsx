@@ -21,6 +21,7 @@ import {
   Languages,
   Check,
   Cast,
+  GripVertical,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -71,12 +72,15 @@ export function FullScreenPlayer() {
     toggleShuffle,
     cycleRepeat,
     removeFromQueue,
+    reorderQueue,
     setIsFullScreen,
     castAudio,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
   const [activeTab, setActiveTab] = useState<'lyrics' | 'queue'>('lyrics');
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [lyrics, setLyrics] = useState<LyricsResponse | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
@@ -834,47 +838,123 @@ export function FullScreenPlayer() {
             </>
           ) : (
             <div className="space-y-2">
+              <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/10 text-xs text-zinc-400">
+                <span>Drag to reorder songs</span>
+                <span>{queue.length} track{queue.length === 1 ? '' : 's'}</span>
+              </div>
               {queue.map((item, idx) => {
                 const isCurrent = idx === queueIndex;
+                const isBeingDragged = draggedIdx === idx;
+                const isTarget = dragOverIdx === idx;
                 return (
                   <div
                     key={`${item.id}-${idx}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', String(idx));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDraggedIdx(idx);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverIdx !== idx) setDragOverIdx(idx);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverIdx === idx) setDragOverIdx(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from =
+                        draggedIdx !== null
+                          ? draggedIdx
+                          : parseInt(e.dataTransfer.getData('text/plain'), 10);
+                      if (!isNaN(from) && from !== idx) {
+                        reorderQueue(from, idx);
+                      }
+                      setDraggedIdx(null);
+                      setDragOverIdx(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedIdx(null);
+                      setDragOverIdx(null);
+                    }}
                     onClick={() => playTrack(item, queue)}
                     data-focusable="true"
-                    className={`flex items-center justify-between gap-3 p-2.5 rounded-xl cursor-pointer transition-colors ${
+                    className={`group relative flex items-center justify-between gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${
+                      isTarget ? 'border-t-2 border-emerald-400 bg-emerald-500/10' : ''
+                    } ${
+                      isBeingDragged ? 'opacity-40 scale-[0.98]' : ''
+                    } ${
                       isCurrent
                         ? 'bg-emerald-500/15 border border-emerald-500/30'
-                        : 'hover:bg-white/5'
+                        : 'hover:bg-white/5 border border-transparent'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
+                      {/* Drag Handle */}
+                      <div
+                        className="cursor-grab active:cursor-grabbing p-1 text-zinc-500 hover:text-white transition-colors"
+                        title="Drag to sort"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </div>
+
                       <img
                         src={item.thumbnail}
                         alt={item.title}
                         className="w-10 h-10 rounded-lg object-cover bg-zinc-800 shrink-0"
                       />
                       <div className="min-w-0">
-                        <p
-                          className={`text-sm font-medium truncate ${
-                            isCurrent ? 'text-emerald-400' : 'text-white'
-                          }`}
-                        >
-                          {item.title}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p
+                            className={`text-sm font-medium truncate ${
+                              isCurrent ? 'text-emerald-400' : 'text-white'
+                            }`}
+                          >
+                            {item.title}
+                          </p>
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Now Playing
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-zinc-400 truncate">
                           {item.artists.map((a) => a.name).join(', ')}
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFromQueue(idx);
-                      }}
-                      className="p-1.5 text-zinc-500 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!isCurrent && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const targetIdx = queueIndex >= 0 ? queueIndex + 1 : 0;
+                            reorderQueue(idx, targetIdx);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 sm:opacity-70 sm:hover:opacity-100 px-2 py-1 rounded-lg text-[11px] font-semibold bg-white/5 hover:bg-emerald-500/20 text-zinc-300 hover:text-emerald-300 transition-all border border-white/5"
+                          title="Move to Next Playing"
+                        >
+                          Play Next
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromQueue(idx);
+                        }}
+                        className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+                        title="Remove from queue"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}

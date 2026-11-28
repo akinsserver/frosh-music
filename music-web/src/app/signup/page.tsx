@@ -3,18 +3,21 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Loader2, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, Loader2, KeyRound, CheckCircle2, ArrowRight, Check, User } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
+import { AVATAR_PRESETS, getAvatarById, getAvatarSvgDataUri } from '@/lib/avatars';
 
 export default function SignUpPage() {
   const [supabase] = useState(() => createClient());
   const router = useRouter();
 
-  // Step 1: 'code' (Verify Access Code) | Step 2: 'account' (Email + Password)
+  // Step 1: 'code' (Verify Access Code) | Step 2: 'account' (Name, Avatar, Email, Password)
   const [step, setStep] = useState<'code' | 'account'>('code');
 
   const [accessCode, setAccessCode] = useState('');
   const [verifiedCode, setVerifiedCode] = useState('');
+  const [name, setName] = useState('');
+  const [selectedAvatarId, setSelectedAvatarId] = useState<string>('neon-beats');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -93,13 +96,30 @@ export default function SignUpPage() {
       return;
     }
 
+    if (!name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+
+    if (!selectedAvatarId) {
+      setError('Please choose an avatar.');
+      return;
+    }
+
     setLoading(true);
+
+    const avatarPreset = getAvatarById(selectedAvatarId);
+    const avatarDataUri = getAvatarSvgDataUri(avatarPreset);
 
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
         data: {
+          display_name: name.trim(),
+          full_name: name.trim(),
+          avatar_id: selectedAvatarId,
+          avatar_url: avatarDataUri,
           access_code: verifiedCode,
         },
       },
@@ -113,6 +133,30 @@ export default function SignUpPage() {
         setError(signUpError.message);
       }
       return;
+    }
+
+    // Save profile to local storage for immediate cache
+    try {
+      localStorage.setItem(
+        'vyla_user_profile',
+        JSON.stringify({
+          display_name: name.trim(),
+          avatar_id: selectedAvatarId,
+          avatar_url: avatarDataUri,
+        })
+      );
+    } catch {}
+
+    // Best-effort profile creation in database
+    if (data.user?.id) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          display_name: name.trim(),
+          avatar_url: avatarDataUri,
+          access_code_used: verifiedCode,
+        });
+      } catch {}
     }
 
     // Record code use (best-effort)
@@ -140,7 +184,7 @@ export default function SignUpPage() {
 
   return (
     <div className="min-h-dvh flex items-center justify-center px-4 py-10 bg-zinc-950">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 backdrop-blur-xl">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 backdrop-blur-xl">
         {/* Brand Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="w-11 h-11 rounded-xl overflow-hidden bg-zinc-900 border border-emerald-500/30 flex items-center justify-center shrink-0">
@@ -254,18 +298,83 @@ export default function SignUpPage() {
           </form>
         )}
 
-        {/* Step 2 Form: Email & Password */}
+        {/* Step 2 Form: Name, Avatar, Email & Password */}
         {step === 'account' && (
           <form onSubmit={handleCreateAccount} className="space-y-4">
+            {/* 1. Name Input (Required) */}
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-zinc-300 mb-1.5">
+                Your Name <span className="text-emerald-400">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="What should we call you?"
+                  className="w-full px-3.5 py-2.5 pl-10 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 text-sm"
+                />
+                <User className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* 2. Choose Avatar (Required) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-zinc-300">
+                  Choose Avatar <span className="text-emerald-400">*</span>
+                </label>
+                <span className="text-xs text-emerald-400 font-medium">
+                  {getAvatarById(selectedAvatarId).name}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1.5 rounded-xl bg-zinc-900/60 border border-white/10">
+                {AVATAR_PRESETS.map((preset) => {
+                  const isSelected = selectedAvatarId === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setSelectedAvatarId(preset.id)}
+                      className={`relative flex flex-col items-center p-1.5 rounded-xl transition-all cursor-pointer hover:scale-105 ${
+                        isSelected
+                          ? 'border-2 border-emerald-400 ring-2 ring-emerald-500/30 bg-emerald-500/10'
+                          : 'border border-white/5 hover:border-white/20 bg-zinc-900'
+                      }`}
+                      title={preset.name}
+                    >
+                      <div
+                        className={`w-9 h-9 rounded-lg bg-gradient-to-br ${preset.gradient} flex items-center justify-center text-lg shadow`}
+                      >
+                        {preset.emoji}
+                      </div>
+                      <span className="text-[9px] text-zinc-400 truncate mt-1 w-full text-center">
+                        {preset.name.split(' ')[0]}
+                      </span>
+                      {isSelected && (
+                        <div className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 text-zinc-950 flex items-center justify-center">
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 3. Email Input (Required) */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-zinc-300 mb-1.5">
-                Email
+                Email <span className="text-emerald-400">*</span>
               </label>
               <input
                 id="email"
                 type="email"
                 required
-                autoFocus
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -274,9 +383,10 @@ export default function SignUpPage() {
               />
             </div>
 
+            {/* 4. Password Input (Required) */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-zinc-300 mb-1.5">
-                Password
+                Password <span className="text-emerald-400">*</span>
               </label>
               <div className="relative">
                 <input
@@ -304,7 +414,7 @@ export default function SignUpPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !name.trim() || !selectedAvatarId}
               className="w-full py-2.5 rounded-full bg-emerald-500 text-zinc-950 font-semibold text-sm hover:bg-emerald-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
