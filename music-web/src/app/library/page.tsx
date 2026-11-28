@@ -1,13 +1,140 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Heart, History, ListMusic, Play, Plus, Trash2, Download, HardDrive, CheckCircle2 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
 import { useOffline } from '@/context/OfflineContext';
 import { usePlayer } from '@/context/PlayerContext';
-import { formatBytes } from '@/lib/offlineStorage';
+import { formatBytes, type DownloadedTrackSummary } from '@/lib/offlineStorage';
 import { TrackRow } from '@/components/TrackRow';
+import type { Song } from '@/types/music';
+
+function DownloadedTrackItem({
+  item,
+  index,
+  queue,
+  onDelete,
+}: {
+  item: DownloadedTrackSummary;
+  index: number;
+  queue: Song[];
+  onDelete: (id: string) => void;
+}) {
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isOpen, setIsOpen] = useState(false);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const MAX_REVEAL = 72; // px
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    touchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current || e.touches.length !== 1) return;
+    const deltaX = e.touches[0].clientX - touchStartRef.current.x;
+    const deltaY = e.touches[0].clientY - touchStartRef.current.y;
+
+    if (Math.abs(deltaY) > Math.abs(deltaX)) return;
+
+    if (isOpen) {
+      const current = -MAX_REVEAL + deltaX;
+      setSwipeOffset(Math.max(-MAX_REVEAL - 15, Math.min(0, current)));
+    } else {
+      if (deltaX < 0) {
+        setSwipeOffset(Math.max(-MAX_REVEAL - 15, deltaX));
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStartRef.current) return;
+    touchStartRef.current = null;
+
+    if (isOpen) {
+      if (swipeOffset > -MAX_REVEAL / 2) {
+        setSwipeOffset(0);
+        setIsOpen(false);
+      } else {
+        setSwipeOffset(-MAX_REVEAL);
+        setIsOpen(true);
+      }
+    } else {
+      if (swipeOffset < -25) {
+        setSwipeOffset(-MAX_REVEAL);
+        setIsOpen(true);
+      } else {
+        setSwipeOffset(0);
+        setIsOpen(false);
+      }
+    }
+  };
+
+  return (
+    <div className="relative overflow-hidden rounded-xl bg-zinc-900/30">
+      {/* Background Action: Red Delete Button revealed on swipe */}
+      <div className="absolute inset-y-0 right-0 w-[72px] bg-red-600 hover:bg-red-500 flex items-center justify-center transition-colors">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(item.id);
+          }}
+          className="w-full h-full flex flex-col items-center justify-center gap-1 text-white active:scale-95 transition-transform"
+          aria-label={`Delete ${item.song.title} from offline downloads`}
+          title="Delete from offline storage"
+        >
+          <Trash2 className="w-5 h-5" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider">Delete</span>
+        </button>
+      </div>
+
+      {/* Foreground Swipeable Track */}
+      <div
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          transition: touchStartRef.current ? 'none' : 'transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)',
+        }}
+        className="relative bg-zinc-950 flex items-center pr-1.5"
+        onClick={() => {
+          if (isOpen) {
+            setSwipeOffset(0);
+            setIsOpen(false);
+          }
+        }}
+      >
+        <div className="flex-1 min-w-0">
+          <TrackRow
+            track={item.song}
+            index={index}
+            queue={queue}
+            showIndex
+          />
+        </div>
+
+        {/* Desktop / Hover direct delete button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(item.id);
+          }}
+          title="Delete from offline storage"
+          data-focusable="true"
+          className="hidden sm:flex items-center justify-center p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function LibraryContent() {
   const searchParams = useSearchParams();
@@ -22,7 +149,7 @@ function LibraryContent() {
     removeTrackFromPlaylist,
   } = useLibrary();
   const { playTrack } = usePlayer();
-  const { downloadedTracks, totalBytes, downloadTracks, clearAllDownloads } = useOffline();
+  const { downloadedTracks, totalBytes, downloadTracks, clearAllDownloads, removeDownload } = useOffline();
 
   const [activeTab, setActiveTab] = useState<'likes' | 'downloads' | 'history'>('likes');
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -252,14 +379,14 @@ function LibraryContent() {
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {downloadedTracks.map((item, idx) => (
-                <TrackRow
+                <DownloadedTrackItem
                   key={item.id}
-                  track={item.song}
+                  item={item}
                   index={idx}
                   queue={downloadedTracks.map((d) => d.song)}
-                  showIndex
+                  onDelete={removeDownload}
                 />
               ))}
             </div>
