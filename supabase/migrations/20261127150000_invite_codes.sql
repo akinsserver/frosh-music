@@ -42,21 +42,21 @@ returns boolean
 language sql
 security definer
 stable
-set search_path = public
+set search_path = public, extensions
 as $$
   select exists (
     select 1 from public.access_codes
     where is_active
       and (
         upper(btrim(coalesce(code, ''))) = upper(btrim(p_code))
-        or code_hash = encode(digest(upper(btrim(p_code)), 'sha256'), 'hex')
+        or (code_hash is not null and code_hash = encode(digest(upper(btrim(p_code))::bytea, 'sha256'::text), 'hex'))
       )
     union all
     select 1 from public.invite_codes
     where is_active
       and (
         upper(btrim(coalesce(code, ''))) = upper(btrim(p_code))
-        or code_hash = encode(digest(upper(btrim(p_code)), 'sha256'), 'hex')
+        or (code_hash is not null and code_hash = encode(digest(upper(btrim(p_code))::bytea, 'sha256'::text), 'hex'))
       )
   );
 $$;
@@ -67,7 +67,7 @@ returns boolean
 language sql
 security definer
 stable
-set search_path = public
+set search_path = public, extensions
 as $$
   select public.validate_access_code(p_code);
 $$;
@@ -77,14 +77,14 @@ create or replace function public.record_access_code_use(p_code text)
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   update public.access_codes
   set uses = uses + 1
   where is_active
     and (
       upper(btrim(coalesce(code, ''))) = upper(btrim(p_code))
-      or code_hash = encode(digest(upper(btrim(p_code)), 'sha256'), 'hex')
+      or (code_hash is not null and code_hash = encode(digest(upper(btrim(p_code))::bytea, 'sha256'::text), 'hex'))
     );
 
   update public.invite_codes
@@ -92,7 +92,7 @@ as $$
   where is_active
     and (
       upper(btrim(coalesce(code, ''))) = upper(btrim(p_code))
-      or code_hash = encode(digest(upper(btrim(p_code)), 'sha256'), 'hex')
+      or (code_hash is not null and code_hash = encode(digest(upper(btrim(p_code))::bytea, 'sha256'::text), 'hex'))
     );
 $$;
 
@@ -101,7 +101,7 @@ create or replace function public.record_invite_code_use(p_code text)
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select public.record_access_code_use(p_code);
 $$;
