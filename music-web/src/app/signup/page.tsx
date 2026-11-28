@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2, KeyRound, CheckCircle2, ArrowRight, Check, User } from 'lucide-react';
-import { createClient } from '@/lib/supabase';
 import {
   AVATAR_PRESETS,
   getAvatarById,
@@ -14,7 +13,6 @@ import {
 } from '@/lib/avatars';
 
 export default function SignUpPage() {
-  const [supabase] = useState(() => createClient());
   const router = useRouter();
 
   // Step 1: 'code' (Verify Access Code) | Step 2: 'account' (Name, Avatar, Email, Password)
@@ -36,24 +34,15 @@ export default function SignUpPage() {
 
   // Load storage avatars if available
   useEffect(() => {
-    if (supabase) {
-      fetchSupabaseStorageAvatars(supabase).then((avatars) => {
-        if (avatars.length > 0) setStorageAvatars(avatars);
-      });
-    }
-  }, [supabase]);
+    fetchSupabaseStorageAvatars().then((avatars) => {
+      if (avatars.length > 0) setStorageAvatars(avatars);
+    });
+  }, []);
 
-  // Step 1: Validate Access Code against Supabase
+  // Step 1: Validate Access Code against Server BFF
   async function handleVerifyCode(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-
-    if (!supabase) {
-      setError(
-        "Sign-up isn't set up yet — the Supabase URL and anon key are missing. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local (see SUPABASE_AUTH_SETUP.md)."
-      );
-      return;
-    }
 
     const code = accessCode.trim();
     if (!code) {
@@ -64,25 +53,16 @@ export default function SignUpPage() {
     setCodeValidating(true);
 
     try {
-      // Check validate_access_code RPC first, fall back to validate_invite_code
-      let isValid = false;
-      const { data: accessValid, error: accessErr } = await supabase.rpc('validate_access_code', {
-        p_code: code,
+      const res = await fetch('/api/auth/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
       });
-
-      if (!accessErr && accessValid) {
-        isValid = true;
-      } else {
-        const { data: inviteValid } = await supabase.rpc('validate_invite_code', {
-          p_code: code,
-        });
-        if (inviteValid) isValid = true;
-      }
-
+      const data = await res.json();
       setCodeValidating(false);
 
-      if (!isValid) {
-        setError("Invalid access code. Please check your code or request one from the owner.");
+      if (!res.ok || !data.valid) {
+        setError(data.error || 'Invalid access code. Please check your code or request one from the owner.');
         return;
       }
 
@@ -95,16 +75,11 @@ export default function SignUpPage() {
     }
   }
 
-  // Step 2: Create Account in Supabase Auth
+  // Step 2: Create Account in Server BFF
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setNotice(null);
-
-    if (!supabase) {
-      setError("Supabase client is not available.");
-      return;
-    }
 
     if (!verifiedCode) {
       setError('Please verify your access code first.');
@@ -127,74 +102,48 @@ export default function SignUpPage() {
     const avatarPreset = getAvatarById(selectedAvatarId);
     const avatarDataUri = getAvatarSvgDataUri(avatarPreset);
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: {
-          display_name: name.trim(),
-          full_name: name.trim(),
-          avatar_id: selectedAvatarId,
-          avatar_url: avatarDataUri,
-          access_code: verifiedCode,
-        },
-      },
-    });
-
-    if (signUpError) {
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: verifiedCode,
+          email: email.trim(),
+          password,
+          name: name.trim(),
+          avatarId: selectedAvatarId,
+          avatarUrl: avatarDataUri,
+        }),
+      });
+      const data = await res.json();
       setLoading(false);
-      if (signUpError.message.toLowerCase().includes('already registered')) {
-        setError('An account with this email already exists. Try signing in instead.');
-      } else {
-        setError(signUpError.message);
+
+      if (!res.ok || data.error) {
+        if (data.error && data.error.toLowerCase().includes('already registered')) {
+          setError('An account with this email already exists. Try signing in instead.');
+        } else {
+          setError(data.error || 'Failed to create account.');
+        }
+        return;
       }
-      return;
-    }
 
-    // Save profile to local storage for immediate cache
-    try {
-      localStorage.setItem(
-        'vyla_user_profile',
-        JSON.stringify({
-          display_name: name.trim(),
-          avatar_id: selectedAvatarId,
-          avatar_url: avatarDataUri,
-        })
-      );
-    } catch {}
-
-    // Best-effort profile creation in database
-    if (data.user?.id) {
+      // Save profile to local storage for immediate cache
       try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          display_name: name.trim(),
-          avatar_url: avatarDataUri,
-          access_code_used: verifiedCode,
-        });
+        localStorage.setItem(
+          'vyla_user_profile',
+          JSON.stringify({
+            display_name: name.trim(),
+            avatar_id: selectedAvatarId,
+            avatar_url: avatarDataUri,
+          })
+        );
       } catch {}
-    }
 
-    // Record code use (best-effort)
-    try {
-      await supabase.rpc('record_access_code_use', { p_code: verifiedCode });
-    } catch {
-      try {
-        await supabase.rpc('record_invite_code_use', { p_code: verifiedCode });
-      } catch {
-        // Ignored
-      }
-    }
-
-    setLoading(false);
-
-    if (data.session) {
-      // Email confirmation is off: signed in immediately, straight to Home
       router.push('/');
       router.refresh();
-    } else {
-      // Email confirmation is on: the account exists but needs confirmation email
-      setNotice('Account created! Check your email for the confirmation link, then sign in.');
+    } catch (err: any) {
+      setLoading(false);
+      setError(err.message || 'Connection error. Please try again.');
     }
   }
 

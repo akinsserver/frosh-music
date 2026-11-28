@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Song, UserPlaylist, PlayHistoryEvent } from '@/types/music';
-import { createClient } from '@/lib/supabase';
 
 interface LibraryContextValue {
   likedSongs: Song[];
@@ -121,31 +120,23 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [playEvents, hydrated]);
 
-  // Load and merge cloud library from Supabase
+  // Load and merge cloud library via Server BFF
   useEffect(() => {
     if (!hydrated) return;
-    const supabase = createClient();
-    if (!supabase) return;
 
     async function loadCloudLibrary() {
       try {
-        const { data: userData } = await supabase!.auth.getUser();
-        const u = userData?.user;
-        if (!u) {
+        const res = await fetch('/api/user/library');
+        if (!res.ok) {
           isCloudLoadedRef.current = true;
           return;
         }
-        setUserId(u.id);
-
-        const { data: cloudLib } = await supabase!
-          .from('user_libraries')
-          .select('liked_songs, playlists, history')
-          .eq('user_id', u.id)
-          .maybeSingle();
+        const cloudLib = await res.json();
+        setUserId('authenticated');
 
         if (cloudLib) {
-          if (Array.isArray(cloudLib.liked_songs) && cloudLib.liked_songs.length > 0) {
-            setLikedSongs((prev) => mergeSongs(prev, cloudLib.liked_songs as Song[]));
+          if (Array.isArray(cloudLib.likedSongs) && cloudLib.likedSongs.length > 0) {
+            setLikedSongs((prev) => mergeSongs(prev, cloudLib.likedSongs as Song[]));
           }
           if (Array.isArray(cloudLib.playlists) && cloudLib.playlists.length > 0) {
             setPlaylists((prev) => mergePlaylists(prev, cloudLib.playlists as UserPlaylist[]));
@@ -164,22 +155,22 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     loadCloudLibrary();
   }, [hydrated]);
 
-  // Debounced background sync to Supabase user_libraries
+  // Debounced background sync to Server BFF (/api/user/library)
   useEffect(() => {
     if (!hydrated || !userId || !isCloudLoadedRef.current) return;
-    const supabase = createClient();
-    if (!supabase) return;
 
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
     syncTimeoutRef.current = setTimeout(async () => {
       try {
-        await supabase!.from('user_libraries').upsert({
-          user_id: userId,
-          liked_songs: likedSongs,
-          playlists: playlists,
-          history: history.slice(0, 50),
-          updated_at: new Date().toISOString(),
+        await fetch('/api/user/library', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            likedSongs,
+            playlists,
+            history: history.slice(0, 50),
+          }),
         });
       } catch (err) {
         console.warn('[Library] Cloud sync failed:', err);

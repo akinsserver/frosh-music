@@ -132,9 +132,8 @@ export function PlayerBar() {
         <button
           onClick={() => toggleLike(currentTrack)}
           data-focusable="true"
-          className={`hidden sm:block p-1.5 rounded-lg transition-colors ${
-            liked ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-          }`}
+          className={`hidden sm:block p-1.5 rounded-lg transition-colors ${liked ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+            }`}
         >
           <Heart className={`w-4 h-4 ${liked ? 'fill-emerald-400' : ''}`} />
         </button>
@@ -147,9 +146,8 @@ export function PlayerBar() {
             onClick={toggleShuffle}
             data-focusable="true"
             title="Shuffle"
-            className={`hidden md:block p-1 rounded transition-colors ${
-              isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-            }`}
+            className={`hidden md:block p-1 rounded transition-colors ${isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+              }`}
           >
             <Shuffle className="w-4 h-4" />
           </button>
@@ -191,9 +189,8 @@ export function PlayerBar() {
             onClick={cycleRepeat}
             data-focusable="true"
             title={`Repeat: ${repeatMode}`}
-            className={`hidden md:block p-1 rounded transition-colors ${
-              repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-            }`}
+            className={`hidden md:block p-1 rounded transition-colors ${repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+              }`}
           >
             {repeatMode === 'one' ? (
               <Repeat1 className="w-4 h-4" />
@@ -238,9 +235,8 @@ export function PlayerBar() {
           }}
           data-focusable="true"
           title={isPodcast ? "Captions (L)" : "Synced Lyrics (L)"}
-          className={`p-2 rounded-lg transition-colors ${
-            showLyrics ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
-          }`}
+          className={`p-2 rounded-lg transition-colors ${showLyrics ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
+            }`}
         >
           {isPodcast ? <Subtitles className="w-4 h-4" /> : <Mic2 className="w-4 h-4" />}
         </button>
@@ -252,9 +248,8 @@ export function PlayerBar() {
           }}
           data-focusable="true"
           title="Queue"
-          className={`p-2 rounded-lg transition-colors ${
-            showQueue ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
-          }`}
+          className={`p-2 rounded-lg transition-colors ${showQueue ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
+            }`}
         >
           <ListMusic className="w-4 h-4" />
         </button>

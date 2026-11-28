@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
-import { createClient } from '@/lib/supabase';
 
 // Friendly wording for the sign-in errors Supabase returns. The message stays
 // generic on purpose: it never says whether the email itself exists.
@@ -22,9 +21,6 @@ function friendlyError(message: string): string {
 }
 
 export default function LoginPage() {
-  // One browser client for the life of this page; null when Supabase is not
-  // configured (env vars missing).
-  const [supabase] = useState(() => createClient());
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,28 +32,37 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
 
-    if (!supabase) {
-      setError(
-        "Sign-in isn't set up yet — the Supabase URL and anon key are missing. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local (see SUPABASE_AUTH_SETUP.md)."
-      );
-      return;
-    }
-
     setLoading(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    setLoading(false);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      setLoading(false);
 
-    if (signInError) {
-      setError(friendlyError(signInError.message));
-      return;
+      if (!res.ok || data.error) {
+        setError(friendlyError(data.error || 'Failed to sign in'));
+        return;
+      }
+
+      if (data.user) {
+        try {
+          localStorage.setItem('vyla_user_profile', JSON.stringify({
+            display_name: data.user.name,
+            avatar_id: data.user.avatarId,
+          }));
+        } catch {}
+      }
+
+      // Signed in: the homepage is the landing page.
+      router.push('/');
+      router.refresh();
+    } catch (err: any) {
+      setLoading(false);
+      setError(err.message || 'Connection error');
     }
-
-    // Signed in: the homepage is the landing page.
-    router.push('/');
-    router.refresh();
   }
 
   return (

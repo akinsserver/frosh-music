@@ -1,7 +1,6 @@
 import React from 'react';
 import type { Song, PlayHistoryEvent } from '@/types/music';
 import { searchMusic, API_BASE_URL } from '@/lib/api';
-import { createClient } from '@/lib/supabase';
 
 export interface ArtistAffinity {
   name: string;
@@ -378,24 +377,15 @@ export async function fetchGenreTrending(genre: string, limit: number = 15): Pro
 }
 
 /**
- * Fetches "Other Users Liked" from Supabase ecosystem
+ * Fetches "Other Users Liked" from Supabase ecosystem via BFF API endpoint
  */
 export async function fetchCommunityTrending(limit: number = 15): Promise<Song[]> {
   try {
-    const supabase = createClient();
-    if (!supabase) return [];
-
-    const { data, error } = await supabase.rpc('get_community_trending_songs', {
-      p_limit: limit,
-    });
-
-    if (error) {
-      console.warn('[CommunityRecs] RPC error:', error);
-      return [];
-    }
-
-    if (Array.isArray(data)) {
-      return data.filter((s: any) => s && s.id && s.title) as Song[];
+    const res = await fetch(`/api/community/trending?limit=${limit}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (Array.isArray(data.songs)) {
+      return data.songs.filter((s: any) => s && s.id && s.title) as Song[];
     }
     return [];
   } catch (err) {

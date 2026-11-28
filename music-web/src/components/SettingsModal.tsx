@@ -14,7 +14,6 @@ import {
   Users,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase';
 import {
   AVATAR_PRESETS,
   getAvatarById,
@@ -31,7 +30,6 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsModalProps) {
   const router = useRouter();
-  const [supabase] = useState(() => createClient());
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -62,26 +60,29 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
       }
     } catch {}
 
-    if (!supabase) return;
-
-    // Load custom image avatars from Supabase Storage bucket
-    fetchSupabaseStorageAvatars(supabase).then((avatars) => {
+    // Load custom image avatars from Supabase Storage bucket via BFF
+    fetchSupabaseStorageAvatars().then((avatars) => {
       if (avatars.length > 0) setStorageAvatars(avatars);
     });
 
     setLoading(true);
-    supabase.auth.getUser().then(({ data }) => {
-      setLoading(false);
-      const user = data?.user;
-      if (user) {
-        setEmail(user.email || '');
-        const metaName = user.user_metadata?.display_name || user.user_metadata?.full_name;
-        const metaAvatar = user.user_metadata?.avatar_id;
-        if (metaName) setName(metaName);
-        if (metaAvatar) setSelectedAvatarId(metaAvatar);
-      }
-    });
-  }, [isOpen, supabase]);
+    fetch('/api/auth/session')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        setLoading(false);
+        const user = data?.user;
+        if (user) {
+          setEmail(user.email || '');
+          const metaName = user.user_metadata?.display_name || user.user_metadata?.full_name;
+          const metaAvatar = user.user_metadata?.avatar_id;
+          if (metaName) setName(metaName);
+          if (metaAvatar) setSelectedAvatarId(metaAvatar);
+        }
+      })
+      .catch(() => {
+        setLoading(false);
+      });
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -98,29 +99,22 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
       const avatarObj = getAvatarById(selectedAvatarId);
       const avatarUrl = getAvatarSvgDataUri(avatarObj);
 
-      // 1. Update Supabase Auth metadata
-      if (supabase) {
-        await supabase.auth.updateUser({
-          data: {
-            display_name: name.trim(),
-            full_name: name.trim(),
-            avatar_id: selectedAvatarId,
-            avatar_url: avatarUrl,
-          },
-        });
+      // 1. Update profile via BFF server endpoint
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          avatarId: selectedAvatarId,
+          avatarUrl,
+        }),
+      });
 
-        // 2. Best-effort update profiles table
-        const { data: authData } = await supabase.auth.getUser();
-        if (authData?.user?.id) {
-          await supabase.from('profiles').upsert({
-            id: authData.user.id,
-            display_name: name.trim(),
-            avatar_url: avatarUrl,
-          });
-        }
+      if (!res.ok) {
+        throw new Error('Failed to update profile');
       }
 
-      // 3. Save to local storage for instant sync
+      // 2. Save to local storage for instant sync
       localStorage.setItem(
         'vyla_user_profile',
         JSON.stringify({
@@ -168,9 +162,9 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
   }
 
   async function handleSignOut() {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
     localStorage.removeItem('vyla_user_profile');
     onClose();
     router.push('/login');

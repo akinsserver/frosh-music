@@ -151,50 +151,16 @@ export function getAvatarSvgDataUri(preset: AvatarPreset): string {
 }
 
 /**
- * Checks Supabase Storage buckets for uploaded avatar images.
- * Probes common bucket names ('avatars', 'avatar', 'images', 'profile-pictures', 'profiles')
- * and returns them as selectable AvatarPreset objects.
+ * Checks Supabase Storage buckets for uploaded avatar images via server BFF endpoint.
+ * Returns them as selectable AvatarPreset objects without exposing Supabase credentials to the client.
  */
-export async function fetchSupabaseStorageAvatars(supabaseClient: any): Promise<AvatarPreset[]> {
-  if (!supabaseClient) return [];
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '') || '';
-  if (!supabaseUrl) return [];
-
-  const candidateBuckets = ['avatars', 'avatar', 'images', 'profile-pictures', 'profiles'];
-  const results: AvatarPreset[] = [];
-
-  for (const bucket of candidateBuckets) {
-    try {
-      const { data, error } = await supabaseClient.storage.from(bucket).list('', {
-        limit: 50,
-        sortBy: { column: 'name', order: 'asc' },
-      });
-
-      if (!error && Array.isArray(data) && data.length > 0) {
-        for (const file of data) {
-          // Filter for image files
-          if (!/\.(png|jpe?g|webp|svg|gif|avif)$/i.test(file.name)) continue;
-          
-          const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${encodeURIComponent(file.name)}`;
-          const friendlyName = file.name
-            .replace(/\.[^/.]+$/, '')
-            .replace(/[-_]/g, ' ')
-            .replace(/\b\w/g, (l: string) => l.toUpperCase());
-
-          results.push({
-            id: publicUrl,
-            name: friendlyName,
-            emoji: '🖼️',
-            imageUrl: publicUrl,
-            gradient: 'from-emerald-400 via-teal-500 to-emerald-700',
-            border: 'border-emerald-400',
-            bgHex: '#10b981',
-          });
-        }
-        if (results.length > 0) break;
-      }
-    } catch {}
+export async function fetchSupabaseStorageAvatars(_client?: any): Promise<AvatarPreset[]> {
+  try {
+    const res = await fetch('/api/storage/avatars');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.avatars) ? data.avatars : [];
+  } catch {
+    return [];
   }
-
-  return results;
 }

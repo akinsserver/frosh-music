@@ -15,7 +15,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
-import { createClient } from '@/lib/supabase';
+
 export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleTV: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -25,17 +25,17 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
-    if (!supabase) return;
-    supabase.auth
-      .getUser()
-      .then(({ data }) => setUserEmail(data.user?.email ?? null))
+    fetch('/api/auth/session')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setUserEmail(data?.user?.email ?? null))
       .catch(() => {});
   }, []);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    if (supabase) await supabase.auth.signOut();
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    localStorage.removeItem('vyla_user_profile');
     router.push('/login');
     router.refresh();
   }

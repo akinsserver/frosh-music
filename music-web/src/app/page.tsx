@@ -31,10 +31,8 @@ import { SongBoxCard } from '@/components/SongBoxCard';
 import { ShelfCarousel } from '@/components/ShelfCarousel';
 import { SettingsModal } from '@/components/SettingsModal';
 import { getAvatarById } from '@/lib/avatars';
-import { createClient } from '@/lib/supabase';
 
 export default function HomePage() {
-  const [supabase] = useState(() => createClient());
   const [shelves, setShelves] = useState<HomeShelf[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,16 +63,18 @@ export default function HomePage() {
       }
     } catch {}
 
-    if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => {
-      const user = data?.user;
-      if (user) {
-        const metaName = user.user_metadata?.display_name || user.user_metadata?.full_name || '';
-        const metaAvatar = user.user_metadata?.avatar_id || 'neon-beats';
-        setUserProfile({ name: metaName, avatarId: metaAvatar });
-      }
-    });
-  }, [supabase]);
+    fetch('/api/auth/session')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const user = data?.user;
+        if (user) {
+          const metaName = user.user_metadata?.display_name || user.user_metadata?.full_name || '';
+          const metaAvatar = user.user_metadata?.avatar_id || 'neon-beats';
+          setUserProfile({ name: metaName, avatarId: metaAvatar });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const userAvatar = getAvatarById(userProfile.avatarId);
 
