@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -17,13 +17,24 @@ import {
   ArrowRight,
   Clock,
   X,
+  TrendingUp,
 } from 'lucide-react';
-import { searchMusic, fetchArtist } from '@/lib/api';
+import { searchMusic, fetchArtist, fetchHome } from '@/lib/api';
+import { fetchTopReleasesThisWeek, getArtistOrPodcastHref } from '@/lib/recommendations';
 import type { SearchAllResponse, Song } from '@/types/music';
 import { TrackRow } from '@/components/TrackRow';
 import { usePlayer } from '@/context/PlayerContext';
+import { useLibrary } from '@/context/LibraryContext';
 
 type SearchTab = 'all' | 'song' | 'album' | 'artist' | 'podcast';
+
+function isPodcastSong(song: Song): boolean {
+  return Boolean(
+    song.artists?.some((a) => a.id?.startsWith('MPSP')) ||
+      (song.duration && song.duration > 1200) ||
+      /\b(podcast|episode|ep\.\s*\d+)\b/i.test(song.title || '')
+  );
+}
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -40,6 +51,14 @@ function SearchContent() {
   const [shufflingTop, setShufflingTop] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Discovery feed state (for empty search state)
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [topTracks, setTopTracks] = useState<Song[]>([]);
+  const [topAlbums, setTopAlbums] = useState<any[]>([]);
+  const [topArtists, setTopArtists] = useState<any[]>([]);
+  const [topPodcasts, setTopPodcasts] = useState<any[]>([]);
 
   // Load recent searches from localStorage
   useEffect(() => {
@@ -82,6 +101,131 @@ function SearchContent() {
   };
 
   const { playTrack, currentTrack, isPlaying } = usePlayer();
+  const { history, likedSongs } = useLibrary();
+
+  // Load discovery feed for empty search state (Spotify / YouTube Music style)
+  useEffect(() => {
+    let mounted = true;
+    setDiscoverLoading(true);
+
+    Promise.allSettled([
+      fetchTopReleasesThisWeek(12),
+      fetchHome(),
+      searchMusic('top albums', 'album'),
+      searchMusic('top artists', 'artist'),
+      searchMusic('top podcasts', 'podcast'),
+    ])
+      .then(([releasesRes, homeRes, albumsRes, artistsRes, podcastsRes]) => {
+        if (!mounted) return;
+
+        // 1. Top tracks
+        const tracks: Song[] = [];
+        const seenTrackIds = new Set<string>();
+        if (releasesRes.status === 'fulfilled' && Array.isArray(releasesRes.value)) {
+          for (const s of releasesRes.value) {
+            if (s?.id && !seenTrackIds.has(s.id)) {
+              seenTrackIds.add(s.id);
+              tracks.push(s);
+            }
+          }
+        }
+        if (homeRes.status === 'fulfilled' && homeRes.value?.shelves) {
+          for (const shelf of homeRes.value.shelves) {
+            for (const item of shelf.items || []) {
+              if (!item?.id || seenTrackIds.has(item.id)) continue;
+              if ('type' in item) {
+                if (item.type === 'song') {
+                  seenTrackIds.add(item.id);
+                  tracks.push({
+                    id: item.id,
+                    title: item.title,
+                    artists: [{ name: item.subtitle || 'Artist' }],
+                    thumbnail: item.thumbnail,
+                    duration: 0,
+                    durationText: '',
+                  });
+                }
+              } else if ('artists' in item) {
+                seenTrackIds.add(item.id);
+                tracks.push(item);
+              }
+            }
+          }
+        }
+        setTopTracks(tracks.slice(0, 15));
+
+        // 2. Top albums
+        if (albumsRes.status === 'fulfilled' && albumsRes.value && 'results' in albumsRes.value) {
+          setTopAlbums((albumsRes.value.results || []).slice(0, 10));
+        }
+
+        // 3. Top artists
+        if (artistsRes.status === 'fulfilled' && artistsRes.value && 'results' in artistsRes.value) {
+          setTopArtists((artistsRes.value.results || []).slice(0, 10));
+        }
+
+        // 4. Top podcasts
+        if (podcastsRes.status === 'fulfilled' && podcastsRes.value && 'results' in podcastsRes.value) {
+          setTopPodcasts((podcastsRes.value.results || []).slice(0, 12));
+        }
+      })
+      .finally(() => {
+        if (mounted) setDiscoverLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Derive user's recent categories from library history & likes
+  const { recentTracks, recentPodcasts, recentAlbums, recentArtists } = useMemo(() => {
+    const rTracks: Song[] = [];
+    const rPodcasts: Song[] = [];
+    const rAlbumsMap = new Map<string, { id: string; title: string; thumbnail: string; artist: string }>();
+    const rArtistsMap = new Map<string, { id: string; name: string; thumbnail: string }>();
+
+    const combined = [...history, ...likedSongs];
+    const seenSongs = new Set<string>();
+
+    for (const s of combined) {
+      if (!s?.id) continue;
+      if (!seenSongs.has(s.id)) {
+        seenSongs.add(s.id);
+        if (isPodcastSong(s)) {
+          rPodcasts.push(s);
+        } else {
+          rTracks.push(s);
+        }
+      }
+
+      if (s.album?.id && !rAlbumsMap.has(s.album.id)) {
+        rAlbumsMap.set(s.album.id, {
+          id: s.album.id,
+          title: s.album.name || s.title,
+          thumbnail: s.thumbnail,
+          artist: s.artists?.map((a) => a.name).join(', ') || 'Album',
+        });
+      }
+
+      for (const a of s.artists || []) {
+        if (a?.id && !a.id.startsWith('MPSP') && a.name && a.name !== 'Unknown Artist' && !rArtistsMap.has(a.id)) {
+          rArtistsMap.set(a.id, {
+            id: a.id,
+            name: a.name,
+            thumbnail: s.thumbnail,
+          });
+        }
+      }
+    }
+
+    return {
+      recentTracks: rTracks.slice(0, 8),
+      recentPodcasts: rPodcasts.slice(0, 8),
+      recentAlbums: Array.from(rAlbumsMap.values()).slice(0, 8),
+      recentArtists: Array.from(rArtistsMap.values()).slice(0, 8),
+    };
+  }, [history, likedSongs]);
 
   // Sync URL query params if navigated to /search?q=...
   useEffect(() => {
@@ -90,7 +234,7 @@ function SearchContent() {
     if (paramQ !== null && paramQ !== query) {
       setQuery(paramQ);
     }
-    if (paramType && ['all', 'song', 'album', 'artist'].includes(paramType) && paramType !== tab) {
+    if (paramType && ['all', 'song', 'album', 'artist', 'podcast'].includes(paramType) && paramType !== tab) {
       setTab(paramType);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,9 +261,6 @@ function SearchContent() {
             setAllData(null);
             setResults(data.results || []);
           }
-          if (trimmed.length >= 2) {
-            addRecentSearch(trimmed);
-          }
         })
         .catch((err) => {
           setError(err.message || 'Search failed');
@@ -131,6 +272,14 @@ function SearchContent() {
 
     return () => clearTimeout(timer);
   }, [query, tab]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    addRecentSearch(trimmed);
+    inputRef.current?.blur();
+  };
 
   const handleShuffleTopResult = async () => {
     const top = allData?.topResult;
@@ -197,25 +346,46 @@ function SearchContent() {
       {/* Search Input */}
       <div className="space-y-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">Search</h1>
-        <div className="relative max-w-2xl">
-          <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+        <form onSubmit={handleSearchSubmit} className="relative max-w-2xl">
+          <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 pointer-events-none" />
           <input
+            ref={inputRef}
             type="text"
-            autoFocus
+            enterKeyHint="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && query.trim()) {
-                addRecentSearch(query.trim());
-              }
-            }}
-            placeholder="Search songs, artists, albums..."
-            className="w-full pl-12 pr-4 py-3.5 rounded-full bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-sm sm:text-base"
+            placeholder="Search songs, artists, albums, podcasts..."
+            className="w-full pl-12 pr-24 py-3.5 rounded-full bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-sm sm:text-base"
           />
-          {loading && (
-            <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 animate-spin text-emerald-400" />
-          )}
-        </div>
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  inputRef.current?.focus();
+                }}
+                aria-label="Clear search"
+                className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              type="submit"
+              data-focusable="true"
+              aria-label="Search"
+              className="px-3.5 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-zinc-950 font-semibold text-xs transition-all flex items-center gap-1"
+            >
+              {loading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <SearchIcon className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">Search</span>
+            </button>
+          </div>
+        </form>
 
         {/* Category Tabs */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
@@ -293,22 +463,448 @@ function SearchContent() {
         )}
       </div>
 
-      {/* Quick Suggestions when empty */}
+      {/* Category-Filtered Discovery Feed when search box is empty (Spotify / YT Music style) */}
       {!query.trim() && (
-        <div className="space-y-3 pt-4">
-          <p className="text-sm font-semibold text-zinc-400">Try searching for</p>
-          <div className="flex flex-wrap gap-2">
-            {quickTags.map((tag) => (
-              <button
-                key={tag}
-                onClick={() => setQuery(tag)}
-                data-focusable="true"
-                className="px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-sm text-zinc-200 transition-colors"
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
+        <div className="space-y-8 pt-2">
+          {/* Quick Suggestions */}
+          {tab === 'all' && (
+            <div className="space-y-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Try searching for
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {quickTags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => {
+                      setQuery(tag);
+                      addRecentSearch(tag);
+                    }}
+                    data-focusable="true"
+                    className="px-4 py-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-sm text-zinc-200 transition-colors"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {discoverLoading && topTracks.length === 0 && (
+            <div className="flex items-center gap-2 text-zinc-400 text-sm py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+              <span>Loading recommendations...</span>
+            </div>
+          )}
+
+          {/* ALL: Recently Played Mix */}
+          {tab === 'all' && history.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  Jump Back In
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {history.slice(0, 6).map((song, idx) => (
+                  <button
+                    key={`jump-${song.id}-${idx}`}
+                    onClick={() => playTrack(song, history)}
+                    data-focusable="true"
+                    className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/5 text-left transition-all group"
+                  >
+                    <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
+                      {song.thumbnail && (
+                        <img src={song.thumbnail} alt={song.title} className="w-full h-full object-cover" />
+                      )}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <Play className="w-4 h-4 text-white fill-white" />
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                        {song.title}
+                      </p>
+                      <p className="text-xs text-zinc-400 truncate">
+                        {song.artists?.map((a) => a.name).join(', ')}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* TRACKS: Recently Played Tracks */}
+          {tab === 'song' && recentTracks.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  Recently Played Tracks
+                </h2>
+              </div>
+              <div className="space-y-1">
+                {recentTracks.slice(0, 6).map((song, idx) => (
+                  <TrackRow
+                    key={`rec-trk-${song.id}-${idx}`}
+                    track={song}
+                    index={idx}
+                    queue={recentTracks}
+                    showIndex
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* TRACKS & ALL: Top Ranking Tracks */}
+          {(tab === 'all' || tab === 'song') && topTracks.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                    Top Ranking Tracks
+                  </h2>
+                </div>
+                {tab === 'all' && (
+                  <button
+                    onClick={() => setTab('song')}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  >
+                    See all
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1">
+                {(tab === 'all' ? topTracks.slice(0, 5) : topTracks).map((song, idx) => (
+                  <TrackRow
+                    key={`top-trk-${song.id}-${idx}`}
+                    track={song}
+                    index={idx}
+                    queue={topTracks}
+                    showIndex
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ARTISTS: Recently Played / Searched Artists */}
+          {tab === 'artist' && recentArtists.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  Your Recent Artists
+                </h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {recentArtists.map((artist, idx) => (
+                  <Link
+                    key={`rec-art-${artist.id}-${idx}`}
+                    href={getArtistOrPodcastHref(artist)}
+                    data-focusable="true"
+                    className="group p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
+                  >
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
+                      {artist.thumbnail ? (
+                        <img
+                          src={artist.thumbnail}
+                          alt={artist.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
+                          <User className="w-10 h-10" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">Recent Artist</p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ARTISTS & ALL: Top Ranking Artists */}
+          {(tab === 'all' || tab === 'artist') && topArtists.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                    Top Ranking Artists
+                  </h2>
+                </div>
+                {tab === 'all' && (
+                  <button
+                    onClick={() => setTab('artist')}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  >
+                    See all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {(tab === 'all' ? topArtists.slice(0, 5) : topArtists).map((artist: any, idx: number) => (
+                  <Link
+                    key={`top-art-${artist.id}-${idx}`}
+                    href={`/artist/${encodeURIComponent(artist.id)}`}
+                    data-focusable="true"
+                    className="group p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
+                  >
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
+                      {artist.thumbnail ? (
+                        <img
+                          src={artist.thumbnail}
+                          alt={artist.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
+                          <User className="w-10 h-10" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5 truncate w-full">
+                      {artist.subscribers || 'Artist'}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ALBUMS: Recently Played Albums */}
+          {tab === 'album' && recentAlbums.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  Recently Played Albums
+                </h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {recentAlbums.map((album, idx) => (
+                  <Link
+                    key={`rec-alb-${album.id}-${idx}`}
+                    href={`/album/${encodeURIComponent(album.id)}`}
+                    data-focusable="true"
+                    className="group p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all"
+                  >
+                    <div className="aspect-square rounded-xl overflow-hidden bg-zinc-800 mb-3">
+                      {album.thumbnail && (
+                        <img
+                          src={album.thumbnail}
+                          alt={album.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white truncate">{album.title}</p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">{album.artist}</p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ALBUMS & ALL: Top Ranking Albums */}
+          {(tab === 'all' || tab === 'album') && topAlbums.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                    Top Ranking Albums
+                  </h2>
+                </div>
+                {tab === 'all' && (
+                  <button
+                    onClick={() => setTab('album')}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  >
+                    See all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {(tab === 'all' ? topAlbums.slice(0, 5) : topAlbums).map((album: any, idx: number) => (
+                  <Link
+                    key={`top-alb-${album.id}-${idx}`}
+                    href={`/album/${encodeURIComponent(album.id)}`}
+                    data-focusable="true"
+                    className="group p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all"
+                  >
+                    <div className="aspect-square rounded-xl overflow-hidden bg-zinc-800 mb-3">
+                      {album.thumbnail && (
+                        <img
+                          src={album.thumbnail}
+                          alt={album.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-white truncate">{album.title}</p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">
+                      {album.artists?.map((a: any) => a.name).join(', ') || album.year || 'Album'}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* PODCASTS: Recently Played Podcasts */}
+          {tab === 'podcast' && recentPodcasts.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  Recently Played Podcasts
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {recentPodcasts.map((item, idx) => (
+                  <div
+                    key={`rec-pod-${item.id}-${idx}`}
+                    onClick={() => playTrack(item, recentPodcasts)}
+                    data-focusable="true"
+                    className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer group transition-all"
+                  >
+                    <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
+                      {item.thumbnail ? (
+                        <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
+                          <Radio className="w-6 h-6" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Play className="w-5 h-5 text-white fill-white" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 mb-0.5 inline-block">
+                        Recent Episode
+                      </span>
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-zinc-400 truncate">
+                        {item.artists?.map((a) => a.name).join(', ') || 'Podcast'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* PODCASTS & ALL: Top Ranking Podcasts */}
+          {(tab === 'all' || tab === 'podcast') && topPodcasts.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-emerald-400" />
+                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                    Top Ranking Podcasts
+                  </h2>
+                </div>
+                {tab === 'all' && (
+                  <button
+                    onClick={() => setTab('podcast')}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  >
+                    See all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(tab === 'all' ? topPodcasts.slice(0, 6) : topPodcasts).map((item: any, idx: number) => {
+                  const isEpisode = item.type === 'episode' || typeof item.duration === 'number';
+                  if (isEpisode) {
+                    return (
+                      <div
+                        key={`top-pod-${item.id}-${idx}`}
+                        onClick={() =>
+                          playTrack(
+                            item,
+                            topPodcasts.filter((r) => r.type === 'episode' || typeof r.duration === 'number')
+                          )
+                        }
+                        data-focusable="true"
+                        className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer group transition-all"
+                      >
+                        <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
+                          {item.thumbnail ? (
+                            <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
+                              <Radio className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Play className="w-5 h-5 text-white fill-white" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                              Episode
+                            </span>
+                            {item.durationText && (
+                              <span className="text-[11px] text-zinc-500">{item.durationText}</span>
+                            )}
+                          </div>
+                          <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                            {item.title}
+                          </p>
+                          <p className="text-xs text-zinc-400 truncate">
+                            {item.artists?.map((a: any) => a.name).join(', ') || item.author || 'Podcast'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <Link
+                      key={`top-pod-show-${item.id}-${idx}`}
+                      href={`/playlist/${encodeURIComponent(item.id)}`}
+                      data-focusable="true"
+                      className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 group transition-all"
+                    >
+                      <div className="w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
+                        {item.thumbnail ? (
+                          <img
+                            src={item.thumbnail}
+                            alt={item.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <Radio className="w-6 h-6 text-indigo-400" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 mb-0.5 inline-block">
+                          Podcast Show
+                        </span>
+                        <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                          {item.title}
+                        </p>
+                        <p className="text-xs text-zinc-400 truncate">{item.author || 'Full Show'}</p>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       )}
 

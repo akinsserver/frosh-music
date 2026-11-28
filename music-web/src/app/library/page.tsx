@@ -154,28 +154,40 @@ function LibraryContent() {
 
   const [activeTab, setActiveTab] = useState<'playlists' | 'likes' | 'downloads' | 'history'>('playlists');
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const playlistInputRef = useRef<HTMLInputElement>(null);
 
   const selectedPlaylist = playlists.find((p) => p.id === selectedPlaylistId);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     const name = newPlaylistName.trim();
-    if (!name) return;
+    if (!name) {
+      setCreateError('Enter a playlist name');
+      playlistInputRef.current?.focus();
+      return;
+    }
+    setCreateError(null);
     const newPl = createPlaylist(name);
     setNewPlaylistName('');
+    setActiveTab('playlists');
     router.push(`/library?playlist=${encodeURIComponent(newPl.id)}`);
   };
 
   if (selectedPlaylist) {
     return (
       <div className="space-y-6">
-        <button
-          onClick={() => router.push('/library')}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Library</span>
-        </button>
+        <div className="sticky top-3 z-30 flex items-center pointer-events-none">
+          <button
+            onClick={() => router.push('/library')}
+            data-focusable="true"
+            aria-label="Back to Library"
+            title="Back to Library"
+            className="pointer-events-auto w-10 h-10 rounded-full bg-zinc-900/75 hover:bg-zinc-800/95 active:scale-95 text-white border border-white/15 backdrop-blur-xl shadow-lg shadow-black/40 flex items-center justify-center transition-all"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        </div>
 
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center gap-4">
@@ -262,23 +274,34 @@ function LibraryContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">Your Library</h1>
 
-        <form onSubmit={handleCreate} className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newPlaylistName}
-            onChange={(e) => setNewPlaylistName(e.target.value)}
-            placeholder="New playlist name..."
-            className="px-3.5 py-2 rounded-full bg-zinc-900 border border-white/15 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-          />
-          <button
-            type="submit"
-            data-focusable="true"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create
-          </button>
-        </form>
+        <div className="w-full sm:w-auto space-y-1">
+          <form onSubmit={handleCreate} className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              ref={playlistInputRef}
+              type="text"
+              value={newPlaylistName}
+              onChange={(e) => {
+                setNewPlaylistName(e.target.value);
+                if (createError) setCreateError(null);
+              }}
+              placeholder="New playlist name..."
+              className={`flex-1 min-w-0 px-3.5 py-2 rounded-full bg-zinc-900 border text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 ${
+                createError ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-white/15'
+              }`}
+            />
+            <button
+              type="submit"
+              data-focusable="true"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-zinc-950 font-semibold text-sm transition-all shrink-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              Create
+            </button>
+          </form>
+          {createError && (
+            <p className="text-xs text-amber-400 pl-3">{createError}</p>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}

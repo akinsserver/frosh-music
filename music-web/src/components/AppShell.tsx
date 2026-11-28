@@ -41,7 +41,7 @@ function InnerShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 text-white">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 text-white pt-[env(safe-area-inset-top)]">
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar isTVMode={isTVMode} onToggleTV={() => setIsTVMode((v) => !v)} />
 

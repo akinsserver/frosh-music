@@ -174,20 +174,21 @@ export default function ArtistPage() {
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Sticky Minimal Back Button */}
+      <div className="sticky top-3 z-30 flex items-center pointer-events-none -mb-12">
+        <button
+          onClick={() => router.back()}
+          data-focusable="true"
+          aria-label="Go back"
+          title="Go back"
+          className="pointer-events-auto w-10 h-10 rounded-full bg-zinc-900/75 hover:bg-zinc-800/95 active:scale-95 text-white border border-white/15 backdrop-blur-xl shadow-lg shadow-black/40 flex items-center justify-center transition-all"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+      </div>
+
       {/* ── Ambient Hero Banner ──────────────────────────────────────────────── */}
-      <div className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8 px-4 sm:px-8 pt-6 pb-8 overflow-hidden rounded-b-3xl border-b border-white/10">
-        {/* Back Button */}
-        <div className="max-w-7xl mx-auto mb-4 relative z-10">
-          <button
-            onClick={() => router.back()}
-            data-focusable="true"
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white backdrop-blur-md transition-colors"
-            title="Go back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
-          </button>
-        </div>
+      <div className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8 px-4 sm:px-8 pt-16 pb-8 overflow-hidden rounded-b-3xl border-b border-white/10">
         {/* Blurred ambient background glow */}
         {artist.thumbnail && (
           <div

@@ -51,16 +51,18 @@ export default function AlbumPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back Button */}
-      <button
-        onClick={() => router.back()}
-        data-focusable="true"
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors"
-        title="Go back"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>Back</span>
-      </button>
+      {/* Sticky Minimal Back Button */}
+      <div className="sticky top-3 z-30 flex items-center pointer-events-none">
+        <button
+          onClick={() => router.back()}
+          data-focusable="true"
+          aria-label="Go back"
+          title="Go back"
+          className="pointer-events-auto w-10 h-10 rounded-full bg-zinc-900/75 hover:bg-zinc-800/95 active:scale-95 text-white border border-white/15 backdrop-blur-xl shadow-lg shadow-black/40 flex items-center justify-center transition-all"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+      </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 pb-6 border-b border-white/10">
