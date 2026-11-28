@@ -13,7 +13,7 @@ import {
   TrendingUp,
   Radio,
 } from 'lucide-react';
-import { fetchHome, isSongItem } from '@/lib/api';
+import { fetchHome, isSongItem, getStreamUrl } from '@/lib/api';
 import type { HomeShelf, Song, HomeCardItem } from '@/types/music';
 import { useLibrary } from '@/context/LibraryContext';
 import {
@@ -203,6 +203,24 @@ export default function HomePage() {
       mounted = false;
     };
   }, [history.length > 0, likedSongs.length > 0]);
+
+  // 6. Item 7: Pre-warm top 2 visible tracks on Home for instant tap-to-play (~0.3s)
+  useEffect(() => {
+    const candidates = [...history.slice(0, 2), ...topReleases.slice(0, 2)];
+    if (candidates.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const seen = new Set<string>();
+      for (const song of candidates) {
+        if (!song?.id || seen.has(song.id)) continue;
+        seen.add(song.id);
+        fetch(`${getStreamUrl(song.id)}/info`).catch(() => {});
+        if (seen.size >= 2) break;
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [history, topReleases]);
 
   return (
     <div className="space-y-8 pb-8">

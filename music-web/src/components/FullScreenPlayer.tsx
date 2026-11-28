@@ -192,6 +192,7 @@ export function FullScreenPlayer() {
   }, [currentTrack?.id]);
 
   // Fetch translation when selected language or lyrics change
+  // For long podcasts (hundreds/thousands of lines), translate a rolling window around current playback first!
   useEffect(() => {
     if (selectedLanguage === 'off') {
       setTranslatedLines(null);
@@ -201,23 +202,68 @@ export function FullScreenPlayer() {
 
     if (!lyrics) return;
 
-    let linesToTranslate: string[] = [];
+    let allLines: string[] = [];
     if (lyrics.isSynced && lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0) {
-      linesToTranslate = lyrics.syncedLyrics.map((l) => l.text || '');
+      allLines = lyrics.syncedLyrics.map((l) => l.text || '');
     } else if (lyrics.plainLyrics) {
-      linesToTranslate = lyrics.plainLyrics.split('\n');
+      allLines = lyrics.plainLyrics.split('\n');
     }
 
-    if (linesToTranslate.length === 0) return;
+    if (allLines.length === 0) return;
 
     let cancelled = false;
-    setTranslating(true);
+    const WINDOW_SIZE = 100;
 
+    // Fast path for normal songs (< 120 lines): translate all at once
+    if (allLines.length <= 120) {
+      setTranslating(true);
+      fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lines: allLines,
+          targetLang: selectedLanguage,
+        }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('Translation failed');
+          return res.json();
+        })
+        .then((data) => {
+          if (!cancelled && data.translated) {
+            setTranslatedLines(data.translated);
+          }
+        })
+        .catch((err) => {
+          console.warn('Lyrics translation error:', err);
+        })
+        .finally(() => {
+          if (!cancelled) setTranslating(false);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Long podcast captions: translate in 100-line windows starting near current playback
+    const approxIdx =
+      lyrics.isSynced && lyrics.syncedLyrics
+        ? Math.max(
+            0,
+            lyrics.syncedLyrics.findIndex((l) => l.time >= currentTime * 1000)
+          )
+        : 0;
+    const startIdx = Math.max(0, approxIdx - 10);
+    const endIdx = Math.min(allLines.length, startIdx + WINDOW_SIZE);
+    const windowLines = allLines.slice(startIdx, endIdx);
+
+    setTranslating(true);
     fetch('/api/translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        lines: linesToTranslate,
+        lines: windowLines,
         targetLang: selectedLanguage,
       }),
     })
@@ -226,12 +272,18 @@ export function FullScreenPlayer() {
         return res.json();
       })
       .then((data) => {
-        if (!cancelled && data.translated) {
-          setTranslatedLines(data.translated);
+        if (!cancelled && Array.isArray(data.translated)) {
+          setTranslatedLines((prev) => {
+            const next = prev && prev.length === allLines.length ? [...prev] : new Array(allLines.length).fill('');
+            for (let i = 0; i < data.translated.length; i++) {
+              next[startIdx + i] = data.translated[i];
+            }
+            return next;
+          });
         }
       })
       .catch((err) => {
-        console.warn('Lyrics translation error:', err);
+        console.warn('Podcast caption translation error:', err);
       })
       .finally(() => {
         if (!cancelled) setTranslating(false);

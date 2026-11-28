@@ -17,13 +17,18 @@ async function translateChunk(chunk: string[], targetLang: string): Promise<stri
   const text = chunk.join('\n');
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(
     targetLang
-  )}&dt=t&q=${encodeURIComponent(text)}`;
+  )}&dt=t`;
+
+  const body = new URLSearchParams({ q: text }).toString();
 
   const res = await fetch(url, {
+    method: 'POST',
     headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
+    body,
   });
 
   if (!res.ok) {
@@ -38,13 +43,33 @@ async function translateChunk(chunk: string[], targetLang: string): Promise<stri
   const fullTranslated = (data[0] as [string, string][]).map((item) => item[0]).join('');
   const translatedLines = fullTranslated.split('\n');
 
-  // If line count drifted slightly due to newline stripping, pad or trim to match chunk
-  if (translatedLines.length < chunk.length) {
-    while (translatedLines.length < chunk.length) {
-      translatedLines.push('');
-    }
+  // Pad if Google collapsed trailing blank lines
+  while (translatedLines.length < chunk.length) {
+    translatedLines.push('');
   }
   return translatedLines.slice(0, chunk.length);
+}
+
+/** Split lines into chunks capped by both line count and total character length */
+function buildChunks(lines: string[], maxLines = 25, maxChars = 1400): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentChars = 0;
+
+  for (const line of lines) {
+    const len = (line || '').length + 1;
+    if (current.length > 0 && (current.length >= maxLines || currentChars + len > maxChars)) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(line);
+    currentChars += len;
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
 }
 
 export async function POST(req: NextRequest) {
@@ -65,28 +90,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ translated: translationCache.get(cacheKey)! });
     }
 
-    // Process in chunks of 35 lines to prevent query string overflow
-    const chunkSize = 35;
-    const results: string[] = [];
+    const chunks = buildChunks(lines, 25, 1400);
+    const chunkResults: string[][] = new Array(chunks.length);
 
-    for (let i = 0; i < lines.length; i += chunkSize) {
-      const chunk = lines.slice(i, i + chunkSize);
-      try {
-        const translatedChunk = await translateChunk(chunk, targetLang);
-        results.push(...translatedChunk);
-      } catch (chunkErr) {
-        console.warn(`Translation chunk error (${i}-${i + chunkSize}):`, chunkErr);
-        // Fallback to original text for this chunk
-        results.push(...chunk);
+    // Run up to 4 chunks concurrently for fast response without rate-limiting
+    const CONCURRENCY = 4;
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+      const batch = chunks.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async (chunk, offset) => {
+          const idx = i + offset;
+          try {
+            chunkResults[idx] = await translateChunk(chunk, targetLang);
+          } catch (chunkErr) {
+            console.warn(`Translation chunk ${idx} error:`, chunkErr);
+            chunkResults[idx] = chunk;
+          }
+        })
+      );
+    }
+
+    const results = chunkResults.flat();
+
+    // Only cache if at least some text actually changed (avoid caching failed rate-limit fallbacks)
+    const anyChanged = results.some((r, idx) => r && r !== lines[idx]);
+    if (anyChanged) {
+      if (translationCache.size > MAX_CACHE_SIZE) {
+        const firstKey = translationCache.keys().next().value;
+        if (firstKey) translationCache.delete(firstKey);
       }
+      translationCache.set(cacheKey, results);
     }
-
-    // Save in cache
-    if (translationCache.size > MAX_CACHE_SIZE) {
-      const firstKey = translationCache.keys().next().value;
-      if (firstKey) translationCache.delete(firstKey);
-    }
-    translationCache.set(cacheKey, results);
 
     return NextResponse.json({ translated: results });
   } catch (err: any) {
