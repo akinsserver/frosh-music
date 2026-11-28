@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Song, UserPlaylist, PlayHistoryEvent } from '@/types/music';
 
 interface LibraryContextValue {
@@ -26,12 +26,29 @@ const STORAGE_KEYS = {
   PLAY_EVENTS: 'vyla_stream_history',
 };
 
+function mergeSongs(local: Song[], cloud: Song[]): Song[] {
+  const map = new Map<string, Song>();
+  for (const s of cloud) if (s && s.id) map.set(s.id, s);
+  for (const s of local) if (s && s.id) map.set(s.id, s);
+  return Array.from(map.values());
+}
+
+function mergePlaylists(local: UserPlaylist[], cloud: UserPlaylist[]): UserPlaylist[] {
+  const map = new Map<string, UserPlaylist>();
+  for (const p of cloud) if (p && p.id) map.set(p.id, p);
+  for (const p of local) if (p && p.id) map.set(p.id, p);
+  return Array.from(map.values());
+}
+
 export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [playlists, setPlaylists] = useState<UserPlaylist[]>([]);
   const [history, setHistory] = useState<Song[]>([]);
   const [playEvents, setPlayEvents] = useState<PlayHistoryEvent[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isCloudLoadedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -102,6 +119,68 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(STORAGE_KEYS.PLAY_EVENTS, JSON.stringify(playEvents));
     } catch {}
   }, [playEvents, hydrated]);
+
+  // Load and merge cloud library via Server BFF
+  useEffect(() => {
+    if (!hydrated) return;
+
+    async function loadCloudLibrary() {
+      try {
+        const res = await fetch('/api/user/library');
+        if (!res.ok) {
+          isCloudLoadedRef.current = true;
+          return;
+        }
+        const cloudLib = await res.json();
+        setUserId('authenticated');
+
+        if (cloudLib) {
+          if (Array.isArray(cloudLib.likedSongs) && cloudLib.likedSongs.length > 0) {
+            setLikedSongs((prev) => mergeSongs(prev, cloudLib.likedSongs as Song[]));
+          }
+          if (Array.isArray(cloudLib.playlists) && cloudLib.playlists.length > 0) {
+            setPlaylists((prev) => mergePlaylists(prev, cloudLib.playlists as UserPlaylist[]));
+          }
+          if (Array.isArray(cloudLib.history) && cloudLib.history.length > 0) {
+            setHistory((prev) => mergeSongs(prev, cloudLib.history as Song[]));
+          }
+        }
+      } catch (err) {
+        console.warn('[Library] Failed to load cloud library:', err);
+      } finally {
+        isCloudLoadedRef.current = true;
+      }
+    }
+
+    loadCloudLibrary();
+  }, [hydrated]);
+
+  // Debounced background sync to Server BFF (/api/user/library)
+  useEffect(() => {
+    if (!hydrated || !userId || !isCloudLoadedRef.current) return;
+
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        await fetch('/api/user/library', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            likedSongs,
+            playlists,
+            history: history.slice(0, 50),
+          }),
+        });
+      } catch (err) {
+        console.warn('[Library] Cloud sync failed:', err);
+      }
+    }, 2000);
+
+    return () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    };
+  }, [likedSongs, playlists, history, hydrated, userId]);
 
   const isLiked = useCallback(
     (songId: string) => likedSongs.some((s) => s.id === songId),

@@ -13,6 +13,13 @@ artistRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Defense-in-depth: Podcast show browse IDs start with MPSP and are playlists in YouTube Music
+    if (id.startsWith('MPSP')) {
+      const playlistId = `VL${id.slice(4)}`;
+      res.redirect(302, `/api/playlist/${playlistId}`);
+      return;
+    }
+
     const yt = await getInnertube();
 
     // Fetch parsed artist page and raw browse response in parallel

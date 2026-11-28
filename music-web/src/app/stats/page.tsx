@@ -28,9 +28,7 @@ type TimeRange =
   | '6-months'
   | '1-year'
   | 'lifetime'
-  | '2026'
-  | '2025'
-  | '2024';
+  | string;
 
 interface AggregatedTrack {
   trackId: string;
@@ -85,6 +83,17 @@ export default function StatisticsPage() {
   const [continuous, setContinuous] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Dynamic years: only show years where user actually has listening data, max 3 years
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const eventYears = playEvents
+      .map((e) => new Date(e.timestamp).getFullYear())
+      .filter((y) => !isNaN(y) && y <= currentYear);
+
+    const distinct = Array.from(new Set([currentYear, ...eventYears])).sort((a, b) => b - a);
+    return distinct.slice(0, 3);
+  }, [playEvents]);
 
   const tracksScrollRef = useRef<HTMLDivElement>(null);
   const albumsScrollRef = useRef<HTMLDivElement>(null);
@@ -321,9 +330,7 @@ export default function StatisticsPage() {
           { key: '6-months', label: '6 months' },
           { key: '1-year', label: '1 year' },
           { key: 'lifetime', label: 'Lifetime' },
-          { key: '2026', label: '2026' },
-          { key: '2025', label: '2025' },
-          { key: '2024', label: '2024' },
+          ...availableYears.map((y) => ({ key: String(y), label: String(y) })),
         ].map((pill) => (
           <button
             key={pill.key}

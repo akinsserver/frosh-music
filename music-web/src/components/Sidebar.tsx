@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Home,
   Search,
@@ -12,13 +12,33 @@ import {
   Heart,
   ListMusic,
   Tv,
+  LogOut,
 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
+
 export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleTV: () => void }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { playlists, likedSongs, createPlaylist } = useLibrary();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/session')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setUserEmail(data?.user?.email ?? null))
+      .catch(() => {});
+  }, []);
+
+  async function handleSignOut() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    localStorage.removeItem('vyla_user_profile');
+    router.push('/login');
+    router.refresh();
+  }
 
   const handleCreatePlaylist = (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,6 +170,23 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
             ))}
           </div>
         </div>
+
+        {/* Signed-in account + Sign out */}
+        <div className="px-3 pb-4 pt-3 border-t border-white/5">
+          {userEmail && (
+            <p className="px-3.5 text-xs text-zinc-500 truncate mb-2" title={userEmail}>
+              {userEmail}
+            </p>
+          )}
+          <button
+            onClick={handleSignOut}
+            data-focusable="true"
+            className="w-full flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
+          >
+            <LogOut className="w-5 h-5" />
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Mobile Bottom Navigation */}
@@ -170,6 +207,13 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
             </Link>
           );
         })}
+        <button
+          onClick={handleSignOut}
+          className="flex flex-col items-center gap-1 px-4 py-1 rounded-lg text-xs text-zinc-400"
+        >
+          <LogOut className="w-5 h-5" />
+          <span>Sign out</span>
+        </button>
       </nav>
     </>
   );

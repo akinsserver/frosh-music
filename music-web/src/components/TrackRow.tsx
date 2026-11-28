@@ -7,15 +7,17 @@ import type { Song } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { useOffline } from '@/context/OfflineContext';
+import { resolveSongArtists, getArtistOrPodcastHref } from '@/lib/recommendations';
 
 interface TrackRowProps {
   track: Song;
   index?: number;
   queue?: Song[];
   showIndex?: boolean;
+  fallbackContext?: string;
 }
 
-export function TrackRow({ track, index, queue, showIndex = false }: TrackRowProps) {
+export function TrackRow({ track, index, queue, showIndex = false, fallbackContext }: TrackRowProps) {
   const { currentTrack, isPlaying, playTrack, togglePlay, addToQueue } = usePlayer();
   const { isLiked, toggleLike, playlists, addTrackToPlaylist } = useLibrary();
   const { isDownloaded, isDownloading, downloadingProgress, downloadTrack, removeDownload } = useOffline();
@@ -84,6 +86,7 @@ export function TrackRow({ track, index, queue, showIndex = false }: TrackRowPro
             alt={track.title}
             className="w-full h-full object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="w-full h-full bg-zinc-800" />
@@ -118,26 +121,16 @@ export function TrackRow({ track, index, queue, showIndex = false }: TrackRowPro
           )}
         </div>
         <div className="text-xs text-zinc-400 truncate mt-0.5 flex items-center gap-1">
-          {track.artists.map((artist, i) => (
+          {resolveSongArtists(track, fallbackContext).map((artist, i) => (
             <React.Fragment key={`${artist.name}-${i}`}>
               {i > 0 && <span>, </span>}
-              {artist.id ? (
-                <Link
-                  href={`/artist/${encodeURIComponent(artist.id)}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-emerald-400 hover:underline transition-colors"
-                >
-                  {artist.name}
-                </Link>
-              ) : (
-                <Link
-                  href={`/search?q=${encodeURIComponent(artist.name)}&type=artist`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-emerald-400 hover:underline transition-colors"
-                >
-                  {artist.name}
-                </Link>
-              )}
+              <Link
+                href={getArtistOrPodcastHref(artist)}
+                onClick={(e) => e.stopPropagation()}
+                className="hover:text-emerald-400 hover:underline transition-colors"
+              >
+                {artist.name}
+              </Link>
             </React.Fragment>
           ))}
         </div>

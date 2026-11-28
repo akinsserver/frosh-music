@@ -28,6 +28,22 @@ interface OfflineContextValue {
 
 const OfflineContext = createContext<OfflineContextValue | null>(null);
 
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function OfflineProvider({ children }: { children: React.ReactNode }) {
   const [downloadedTracks, setDownloadedTracks] = useState<DownloadedTrackSummary[]>([]);
   const [downloadingProgress, setDownloadingProgress] = useState<Record<string, number>>({});
@@ -115,15 +131,18 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
           blob = await res.blob();
         }
 
-        // Best-effort cache artwork for offline display
-        if (song.thumbnail && typeof window !== 'undefined' && 'caches' in window) {
-          caches
-            .open('frosh-offline-art')
-            .then((cache) => cache.add(new Request(song.thumbnail, { mode: 'no-cors' })))
-            .catch(() => {});
+        // Embed thumbnail artwork as offline base64 Data URL so it renders with 0 internet
+        let offlineSong = { ...song };
+        if (song.thumbnail) {
+          try {
+            const dataUrl = await fetchImageAsDataUrl(song.thumbnail);
+            if (dataUrl) {
+              offlineSong.thumbnail = dataUrl;
+            }
+          } catch {}
         }
 
-        const summary = await saveOfflineTrack(song, blob, contentType);
+        const summary = await saveOfflineTrack(offlineSong, blob, contentType);
         setDownloadedTracks((prev) => {
           const filtered = prev.filter((t) => t.id !== summary.id);
           return [summary, ...filtered];

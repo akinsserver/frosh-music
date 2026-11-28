@@ -17,15 +17,45 @@ playlistRouter.get('/:id', async (req: Request, res: Response): Promise<void> =>
     const playlistData: any = await yt.music.getPlaylist(id);
 
     const title = playlistData.header?.title?.text || playlistData.title?.text || playlistData.title || 'Playlist';
-    const author = playlistData.header?.author?.name || playlistData.header?.author?.text || '';
-    const description = playlistData.header?.description?.text;
-    const { bestUrl } = getBestThumbnail(playlistData.header?.thumbnails || playlistData.thumbnails);
+    const author =
+      playlistData.header?.author?.name ||
+      playlistData.header?.author?.text ||
+      playlistData.header?.strapline_text_one?.text ||
+      playlistData.author?.name ||
+      playlistData.author ||
+      '';
+    const description = playlistData.header?.description?.text || playlistData.description?.text || playlistData.description;
+    const { bestUrl } = getBestThumbnail(
+      playlistData.header?.thumbnail ||
+      playlistData.header?.thumbnails ||
+      playlistData.thumbnail ||
+      playlistData.thumbnails
+    );
 
     const tracks: Song[] = [];
-    if (playlistData.contents) {
-      for (const item of playlistData.contents) {
-        const song = formatTrackItem(item);
-        if (song) tracks.push(song);
+    const isGenericAuthor = !author || ['youtube music', 'spotify', 'apple music', 'various artists', 'frosh'].some(w => author.toLowerCase().includes(w));
+    const fallbackContext = (!isGenericAuthor ? author : '') || title;
+    const contents = playlistData.contents || playlistData.items || playlistData.videos || [];
+    if (Array.isArray(contents)) {
+      for (const item of contents) {
+        const song = formatTrackItem(item, fallbackContext);
+        if (song) {
+          // Extra safety: If song still shows Unknown Artist, infer from title / author (e.g. "Presenting Asake" -> "Asake")
+          if (
+            !song.artists ||
+            song.artists.length === 0 ||
+            song.artists.every((a) => !a.name || a.name.toLowerCase() === 'unknown artist')
+          ) {
+            const contextText = `${title} ${author}`.trim();
+            const match = contextText.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
+            const suffixMatch = contextText.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
+            const resolvedName = match ? match[1].trim() : (suffixMatch ? suffixMatch[1].trim() : (!isGenericAuthor ? author.trim() : ''));
+            if (resolvedName) {
+              song.artists = [{ name: resolvedName }];
+            }
+          }
+          tracks.push(song);
+        }
       }
     }
 

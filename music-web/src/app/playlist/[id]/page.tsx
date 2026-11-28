@@ -1,15 +1,17 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { Play, Loader2, ListMusic } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { Play, Loader2, ListMusic, ArrowLeft } from 'lucide-react';
 import { fetchPlaylist } from '@/lib/api';
 import type { Playlist } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { TrackRow } from '@/components/TrackRow';
+import { resolveSongArtists } from '@/lib/recommendations';
 
 export default function PlaylistPage() {
   const params = useParams();
+  const router = useRouter();
   const id = decodeURIComponent(String(params.id || ''));
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,7 +23,12 @@ export default function PlaylistPage() {
     setLoading(true);
     fetchPlaylist(id)
       .then((data) => {
-        setPlaylist(data);
+        const fallbackContext = data.title || data.author;
+        const cleanedTracks = (data.tracks || []).map((t) => ({
+          ...t,
+          artists: resolveSongArtists(t, fallbackContext),
+        }));
+        setPlaylist({ ...data, tracks: cleanedTracks });
         setError(null);
       })
       .catch((err) => setError(err.message || 'Failed to load playlist'))
@@ -46,7 +53,18 @@ export default function PlaylistPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      {/* Back Button */}
+      <button
+        onClick={() => router.back()}
+        data-focusable="true"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors"
+        title="Go back"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        <span>Back</span>
+      </button>
+
       <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 pb-6 border-b border-white/10">
         <div className="w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden shadow-2xl bg-zinc-800 shrink-0">
           {playlist.thumbnail ? (
@@ -97,6 +115,7 @@ export default function PlaylistPage() {
             index={idx}
             queue={playlist.tracks}
             showIndex
+            fallbackContext={playlist.title || playlist.author}
           />
         ))}
       </div>

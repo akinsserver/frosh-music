@@ -17,9 +17,12 @@ import {
   Maximize2,
   Heart,
   Loader2,
+  Cast,
+  Subtitles,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
+import { getArtistOrPodcastHref } from '@/lib/recommendations';
 
 function formatTime(sec: number): string {
   if (!sec || isNaN(sec)) return '0:00';
@@ -53,6 +56,7 @@ export function PlayerBar() {
     setIsFullScreen,
     setShowLyrics,
     setShowQueue,
+    castAudio,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
@@ -73,6 +77,11 @@ export function PlayerBar() {
 
   const liked = isLiked(currentTrack.id);
   const progressPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const isPodcast = Boolean(
+    currentTrack.artists.some((a) => a.id?.startsWith('MPSP')) ||
+    (currentTrack.duration && currentTrack.duration > 1200) ||
+    /\b(podcast|episode|ep\.\s*\d+)\b/i.test(currentTrack.title || '')
+  );
 
   return (
     <footer className="fixed bottom-14 md:static left-0 right-0 z-30 h-16 md:h-22 px-3 md:px-6 bg-zinc-950/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-between gap-4 shrink-0">
@@ -108,11 +117,7 @@ export function PlayerBar() {
                 <span key={`${a.name}-${i}`}>
                   {i > 0 && ', '}
                   <Link
-                    href={
-                      a.id
-                        ? `/artist/${encodeURIComponent(a.id)}`
-                        : `/search?q=${encodeURIComponent(a.name)}&type=artist`
-                    }
+                    href={getArtistOrPodcastHref(a)}
                     onClick={(e) => e.stopPropagation()}
                     className="hover:text-emerald-400 hover:underline transition-colors"
                   >
@@ -127,9 +132,8 @@ export function PlayerBar() {
         <button
           onClick={() => toggleLike(currentTrack)}
           data-focusable="true"
-          className={`hidden sm:block p-1.5 rounded-lg transition-colors ${
-            liked ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-          }`}
+          className={`hidden sm:block p-1.5 rounded-lg transition-colors ${liked ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+            }`}
         >
           <Heart className={`w-4 h-4 ${liked ? 'fill-emerald-400' : ''}`} />
         </button>
@@ -142,9 +146,8 @@ export function PlayerBar() {
             onClick={toggleShuffle}
             data-focusable="true"
             title="Shuffle"
-            className={`hidden md:block p-1 rounded transition-colors ${
-              isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-            }`}
+            className={`hidden md:block p-1 rounded transition-colors ${isShuffle ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+              }`}
           >
             <Shuffle className="w-4 h-4" />
           </button>
@@ -186,9 +189,8 @@ export function PlayerBar() {
             onClick={cycleRepeat}
             data-focusable="true"
             title={`Repeat: ${repeatMode}`}
-            className={`hidden md:block p-1 rounded transition-colors ${
-              repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
-            }`}
+            className={`hidden md:block p-1 rounded transition-colors ${repeatMode !== 'off' ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
+              }`}
           >
             {repeatMode === 'one' ? (
               <Repeat1 className="w-4 h-4" />
@@ -232,12 +234,11 @@ export function PlayerBar() {
             setIsFullScreen(true);
           }}
           data-focusable="true"
-          title="Synced Lyrics (L)"
-          className={`p-2 rounded-lg transition-colors ${
-            showLyrics ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
-          }`}
+          title={isPodcast ? "Captions (L)" : "Synced Lyrics (L)"}
+          className={`p-2 rounded-lg transition-colors ${showLyrics ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
+            }`}
         >
-          <Mic2 className="w-4 h-4" />
+          {isPodcast ? <Subtitles className="w-4 h-4" /> : <Mic2 className="w-4 h-4" />}
         </button>
 
         <button
@@ -247,9 +248,8 @@ export function PlayerBar() {
           }}
           data-focusable="true"
           title="Queue"
-          className={`p-2 rounded-lg transition-colors ${
-            showQueue ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
-          }`}
+          className={`p-2 rounded-lg transition-colors ${showQueue ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
+            }`}
         >
           <ListMusic className="w-4 h-4" />
         </button>
@@ -276,6 +276,15 @@ export function PlayerBar() {
             className="w-20 accent-emerald-400 cursor-pointer"
           />
         </div>
+
+        <button
+          onClick={castAudio}
+          data-focusable="true"
+          title="Cast or AirPlay to TV / Speaker"
+          className="p-2 text-zinc-400 hover:text-white transition-colors"
+        >
+          <Cast className="w-4 h-4" />
+        </button>
 
         <button
           onClick={() => setIsFullScreen(true)}

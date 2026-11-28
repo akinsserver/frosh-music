@@ -1,7 +1,7 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+// Deprecated: All Supabase interactions now run server-side via Next.js BFF Route Handlers (/api/auth/*, /api/user/*).
+// Neither SUPABASE_URL nor SUPABASE_ANON_KEY is exposed to the browser.
+// This prevents third parties from discovering Supabase credentials in client bundles.
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-export const supabase: SupabaseClient | null =
-  supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+export function createClient() {
+  return null;
+}

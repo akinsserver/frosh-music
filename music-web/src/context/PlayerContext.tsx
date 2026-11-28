@@ -44,9 +44,11 @@ interface PlayerContextValue {
   addToQueue: (track: Song) => void;
   playNext: (track: Song) => void;
   removeFromQueue: (index: number) => void;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
   setIsFullScreen: (open: boolean) => void;
   setShowLyrics: (open: boolean) => void;
   setShowQueue: (open: boolean) => void;
+  castAudio: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -78,6 +80,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const queueIndexRef = useRef(queueIndex);
   const isShuffleRef = useRef(isShuffle);
   const repeatModeRef = useRef(repeatMode);
+  const currentTrackRef = useRef(currentTrack);
+  const isDownloadedRef = useRef(isDownloaded);
+  const nextTrackRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    isDownloadedRef.current = isDownloaded;
+  }, [isDownloaded]);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   useEffect(() => {
     queueRef.current = queue;
@@ -135,7 +148,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Synchronous path for online streams so iOS Safari preserves user-gesture activation
-      if (!isDownloaded(track.id)) {
+      if (!isDownloadedRef.current(track.id)) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('You are offline and this track is not downloaded.');
           setIsPlaying(false);
@@ -156,7 +169,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       });
     },
-    [recordPlay, isDownloaded, startAudioPlayback]
+    [recordPlay, startAudioPlayback]
   );
 
   const playTrack = useCallback(
@@ -216,6 +229,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex(nextIdx);
     loadAndPlay(q[nextIdx]);
   }, [loadAndPlay]);
+
+  useEffect(() => {
+    nextTrackRef.current = nextTrack;
+  }, [nextTrack]);
 
   const prevTrack = useCallback(() => {
     const audio = audioRef.current;
@@ -301,15 +318,66 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex((prevIdx) => (index < prevIdx ? prevIdx - 1 : prevIdx));
   }, []);
 
+  const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setQueue((prevQueue) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= prevQueue.length ||
+        toIndex < 0 ||
+        toIndex >= prevQueue.length
+      ) {
+        return prevQueue;
+      }
+      const newQueue = [...prevQueue];
+      const [moved] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, moved);
+
+      setQueueIndex((currentIdx) => {
+        if (currentIdx === fromIndex) {
+          return toIndex;
+        }
+        if (fromIndex < currentIdx && toIndex >= currentIdx) {
+          return currentIdx - 1;
+        }
+        if (fromIndex > currentIdx && toIndex <= currentIdx) {
+          return currentIdx + 1;
+        }
+        return currentIdx;
+      });
+
+      return newQueue;
+    });
+  }, []);
+
   // Attach listeners to DOM-mounted <audio> element once
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.volume = 0.85;
 
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
+    const onTimeUpdate = () => {
+      const cur = audio.currentTime || 0;
+      setCurrentTime(cur);
+
+      // Prevent dead silence if stream has trailing empty buffer beyond true track duration
+      const metaDuration = currentTrackRef.current?.duration;
+      if (metaDuration && metaDuration > 0 && cur >= metaDuration - 0.5) {
+        nextTrackRef.current?.();
+      }
+    };
+
     const onDurationChange = () => {
       if (audio.duration && !isNaN(audio.duration)) {
+        const metaDuration = currentTrackRef.current?.duration;
+        // YouTube VBR audio streams often report inflated durations in browsers.
+        // If metadata duration is known, preserve the true song length.
+        if (metaDuration && metaDuration > 0) {
+          if (Math.abs(audio.duration - metaDuration) > 4) {
+            setDuration(metaDuration);
+            return;
+          }
+        }
         setDuration(audio.duration);
       }
     };
@@ -320,13 +388,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     };
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => nextTrack();
+    const onEnded = () => nextTrackRef.current?.();
     const onError = () => {
       setIsLoading(false);
       setIsPlaying(false);
       const mediaErr = audio.error;
       if (mediaErr?.code === 1) return; // Ignore benign track-switch aborts
-      if (audio.src) {
+      if (audio.src && audio.src !== window.location.href) {
         const detail = mediaErr?.message || (mediaErr?.code ? `code ${mediaErr.code}` : '');
         console.error('[Player] Media error:', mediaErr?.code, mediaErr?.message, audio.src);
         setError(detail ? `Stream unavailable (${detail}).` : 'Stream interrupted or unavailable.');
@@ -354,7 +422,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [nextTrack]);
+  }, []);
 
   // Native MediaSession API for OS lock-screen, Bluetooth, & Fire TV remotes
   useEffect(() => {
@@ -464,6 +532,46 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [togglePlay, nextTrack, prevTrack, toggleMute]);
 
+  const castAudio = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // 1. Apple AirPlay (Safari / iOS / iPadOS / macOS PWA)
+    if (typeof (audio as any).webkitShowPlaybackTargetPicker === 'function') {
+      try {
+        (audio as any).webkitShowPlaybackTargetPicker();
+        return;
+      } catch (e) {
+        console.warn('[AirPlay] webkitShowPlaybackTargetPicker error:', e);
+      }
+    }
+
+    // 2. Google Cast / Remote Playback API (Chrome / Android / Edge)
+    if ((audio as any).remote && typeof (audio as any).remote.prompt === 'function') {
+      try {
+        await (audio as any).remote.prompt();
+        return;
+      } catch (e: any) {
+        if (e?.name !== 'NotAllowedError') {
+          console.warn('[Cast] RemotePlayback.prompt error:', e);
+        }
+      }
+    }
+
+    // 3. Audio Output Device Picker (Chrome / Edge selectAudioOutput)
+    if (navigator.mediaDevices && typeof (navigator.mediaDevices as any).selectAudioOutput === 'function') {
+      try {
+        const device = await (navigator.mediaDevices as any).selectAudioOutput();
+        if (device && typeof (audio as any).setSinkId === 'function') {
+          await (audio as any).setSinkId(device.deviceId);
+        }
+        return;
+      } catch (e) {
+        console.warn('[AudioDevice] selectAudioOutput error:', e);
+      }
+    }
+  }, []);
+
   return (
     <PlayerContext.Provider
       value={{
@@ -494,12 +602,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         addToQueue,
         playNext,
         removeFromQueue,
+        reorderQueue,
         setIsFullScreen,
         setShowLyrics,
         setShowQueue,
+        castAudio,
       }}
     >
-      <audio ref={audioRef} preload="auto" playsInline className="hidden" />
+      <audio ref={audioRef} preload="auto" playsInline x-webkit-airplay="allow" className="hidden" />
       {children}
     </PlayerContext.Provider>
   );

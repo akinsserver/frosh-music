@@ -114,27 +114,152 @@ export function getBestThumbnail(input: any): { bestUrl: string; list: Thumbnail
 /**
  * Format a raw InnerTube track item into a clean Song model
  */
-export function formatTrackItem(item: any): Song | null {
+export function formatTrackItem(item: any, fallbackContext?: string): Song | null {
   if (!item) return null;
 
   const id = item.id || item.video_id;
   if (!id) return null;
 
-  const title = typeof item.title === 'string' ? item.title : item.title?.text || 'Unknown Title';
+  let title = typeof item.title === 'string' ? item.title : item.title?.text || 'Unknown Title';
 
   const artists: ArtistReference[] = [];
+
+  // 1. Direct artists array
   if (Array.isArray(item.artists)) {
     for (const a of item.artists) {
+      const name = a?.name || a?.text;
+      if (name && name !== 'Unknown Artist') {
+        artists.push({
+          id: a.channel_id || a.id || a.endpoint?.payload?.browseId,
+          name,
+        });
+      }
+    }
+  }
+
+  // 2. Direct authors array (plural)
+  if (artists.length === 0 && Array.isArray(item.authors)) {
+    for (const a of item.authors) {
+      const name = a?.name || a?.text;
+      if (name && name !== 'Unknown Artist') {
+        artists.push({
+          id: a.channel_id || a.id || a.endpoint?.payload?.browseId,
+          name,
+        });
+      }
+    }
+  }
+
+  // 3. Single author
+  if (artists.length === 0 && item.author) {
+    const name = typeof item.author === 'string' ? item.author : item.author.name || item.author.text;
+    if (name && name !== 'Unknown Artist') {
       artists.push({
-        id: a.channel_id || a.id || a.endpoint?.payload?.browseId,
-        name: a.name || a.text || 'Unknown Artist',
+        id: item.author.channel_id || item.author.id || item.author.endpoint?.payload?.browseId,
+        name,
       });
     }
-  } else if (item.author) {
-    artists.push({
-      id: item.author.channel_id || item.author.id || item.author.endpoint?.payload?.browseId,
-      name: typeof item.author === 'string' ? item.author : item.author.name || 'Unknown Artist',
-    });
+  }
+
+  // 4. Uploader or Channel
+  if (artists.length === 0 && (item.uploader || item.channel)) {
+    const target = item.uploader || item.channel;
+    const name = typeof target === 'string' ? target : target.name || target.text || target.title;
+    if (name && name !== 'Unknown Artist') {
+      artists.push({
+        id: target.id || target.channel_id,
+        name,
+      });
+    }
+  }
+
+  // 5. flex_columns runs (Column 1 is almost always Artist in InnerTube MusicResponsiveListItem)
+  if (artists.length === 0 && Array.isArray(item.flex_columns) && item.flex_columns[1]) {
+    const col = item.flex_columns[1];
+    const runs = col?.title?.runs || col?.runs;
+    if (Array.isArray(runs)) {
+      for (const r of runs) {
+        const text = r?.text?.trim();
+        if (
+          text &&
+          !/^[•·|&,/-]\s*$/.test(text) &&
+          !/^\d+(?:\.\d+)?[KMB]?\s+(?:plays|views)$/i.test(text) &&
+          !/^\d+:\d+$/.test(text) &&
+          text.toLowerCase() !== 'unknown artist'
+        ) {
+          artists.push({ id: r.endpoint?.payload?.browseId, name: text });
+        }
+      }
+    } else if (col?.title?.text) {
+      const parts = col.title.text.split(/•|·|\|/);
+      if (parts[0]?.trim() && parts[0].trim().toLowerCase() !== 'unknown artist') {
+        // Handle "Artist 1 & Artist 2"
+        const subArtists = parts[0].split(/\s+(?:&|feat\.?|ft\.?)\s+/i);
+        for (const sa of subArtists) {
+          if (sa.trim() && sa.trim().toLowerCase() !== 'unknown artist') {
+            artists.push({ name: sa.trim() });
+          }
+        }
+      }
+    }
+  }
+
+  // 6. Subtitle runs / text
+  if (artists.length === 0 && item.subtitle) {
+    const runs = item.subtitle?.runs;
+    if (Array.isArray(runs) && runs.length > 0) {
+      for (const r of runs) {
+        const text = r?.text?.trim();
+        if (
+          text &&
+          !/^[•·|&,/-]\s*$/.test(text) &&
+          !/^\d+(?:\.\d+)?[KMB]?\s+(?:plays|views)$/i.test(text) &&
+          !/^\d+:\d+$/.test(text) &&
+          text.toLowerCase() !== 'unknown artist' &&
+          text.toLowerCase() !== 'song' &&
+          text.toLowerCase() !== 'video'
+        ) {
+          artists.push({ id: r.endpoint?.payload?.browseId, name: text });
+        }
+      }
+    } else if (typeof item.subtitle?.text === 'string') {
+      const parts = item.subtitle.text.split(/•|·|\|/);
+      if (parts[0]?.trim() && parts[0].trim().toLowerCase() !== 'unknown artist') {
+        const subArtists = parts[0].split(/\s+(?:&|feat\.?|ft\.?)\s+/i);
+        for (const sa of subArtists) {
+          if (sa.trim() && sa.trim().toLowerCase() !== 'unknown artist') {
+            artists.push({ name: sa.trim() });
+          }
+        }
+      }
+    }
+  }
+
+  // 7. Title splitting if "Artist - Title" (standard YouTube music video upload pattern)
+  if (artists.length === 0 && (title.includes(' - ') || title.includes(' – ') || title.includes(' — '))) {
+    const splitMatch = title.split(/\s*[-–—]\s*/);
+    if (splitMatch.length >= 2 && splitMatch[0].trim() && splitMatch[1].trim()) {
+      artists.push({ name: splitMatch[0].trim() });
+      title = splitMatch.slice(1).join(' - ').trim();
+    }
+  }
+
+  // 8. Playlist fallback context (e.g. "Presenting Asake" -> "Asake", "Asake Essentials" -> "Asake")
+  if (artists.length === 0 && fallbackContext) {
+    const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
+    if (match && match[1]) {
+      artists.push({ name: match[1].trim() });
+    } else {
+      const suffixMatch = fallbackContext.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
+      if (suffixMatch && suffixMatch[1]) {
+        artists.push({ name: suffixMatch[1].trim() });
+      } else {
+        const ignoreList = ['playlist', 'youtube music', 'spotify', 'apple music', 'various artists', 'frosh', 'unknown'];
+        if (!ignoreList.some((w) => fallbackContext.toLowerCase().includes(w))) {
+          artists.push({ name: fallbackContext.trim() });
+        }
+      }
+    }
   }
 
   const album = item.album
