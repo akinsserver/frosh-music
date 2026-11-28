@@ -8,6 +8,7 @@ import { useOffline } from '@/context/OfflineContext';
 import { usePlayer } from '@/context/PlayerContext';
 import { formatBytes, type DownloadedTrackSummary } from '@/lib/offlineStorage';
 import { TrackRow } from '@/components/TrackRow';
+import { UserAvatarButton } from '@/components/UserAvatarButton';
 import type { Song } from '@/types/music';
 
 function DownloadedTrackItem({
@@ -272,7 +273,12 @@ function LibraryContent() {
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-white">Your Library</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white">Your Library</h1>
+          <div className="sm:hidden">
+            <UserAvatarButton />
+          </div>
+        </div>
 
         <div className="w-full sm:w-auto space-y-1">
           <form onSubmit={handleCreate} className="flex items-center gap-2 w-full sm:w-auto">

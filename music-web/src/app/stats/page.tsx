@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
 import { usePlayer } from '@/context/PlayerContext';
+import { UserAvatarButton } from '@/components/UserAvatarButton';
 import type { Song, PlayHistoryEvent } from '@/types/music';
 
 type TimeRange =
@@ -287,9 +288,12 @@ export default function StatisticsPage() {
     <div className="space-y-10 pb-24 relative max-w-7xl mx-auto">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-          Statistics
-        </h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+            Statistics
+          </h1>
+          <UserAvatarButton />
+        </div>
         <p className="text-sm sm:text-base text-zinc-400">
           {timeRangeLabel}: <span className="text-zinc-200 font-semibold">{totalPlays} plays</span>,{' '}
           <span className="text-zinc-200 font-semibold">{formatDuration(totalListeningSeconds)}</span> of listening.

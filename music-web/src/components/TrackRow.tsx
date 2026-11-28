@@ -198,7 +198,7 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
           className={`p-1.5 rounded-lg transition-colors ${
             liked
               ? 'text-emerald-400 opacity-100'
-              : 'text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-white'
+              : 'text-zinc-400 opacity-75 sm:opacity-0 sm:group-hover:opacity-100 hover:text-white'
           }`}
         >
           <Heart className={`w-4 h-4 ${liked ? 'fill-emerald-400' : ''}`} />
@@ -208,7 +208,7 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
           onClick={handleAddToQueue}
           title="Add to Queue"
           data-focusable="true"
-          className="p-1.5 rounded-lg text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-white transition-colors"
+          className="p-1.5 rounded-lg text-zinc-400 opacity-75 sm:opacity-0 sm:group-hover:opacity-100 hover:text-white transition-colors"
         >
           {addedFeedback ? (
             <Check className="w-4 h-4 text-emerald-400" />
@@ -225,7 +225,7 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
                 setShowPlaylistMenu((p) => !p);
               }}
               title="Add to Playlist"
-              className="p-1.5 rounded-lg text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 opacity-75 sm:opacity-0 sm:group-hover:opacity-100 hover:text-white transition-colors"
             >
               <Plus className="w-4 h-4" />
             </button>
@@ -254,7 +254,7 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
           </div>
         )}
 
-        <span className="text-xs text-zinc-500 w-10 text-right tabular-nums">
+        <span className="hidden sm:inline-block text-xs text-zinc-500 w-10 text-right tabular-nums">
           {track.durationText}
         </span>
       </div>

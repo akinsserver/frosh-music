@@ -52,6 +52,11 @@ export default function PlaylistPage() {
     );
   }
 
+  const isPodcastShow =
+    id.startsWith('VLSP') ||
+    id.startsWith('MPSP') ||
+    /podcast/i.test(playlist.title || '');
+
   return (
     <div className="space-y-6">
       {/* Sticky Minimal Back Button */}
@@ -84,14 +89,14 @@ export default function PlaylistPage() {
 
         <div className="text-center sm:text-left space-y-2 flex-1 min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-            Playlist
+            {isPodcastShow ? 'Podcast Show' : 'Playlist'}
           </p>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-white truncate">
             {playlist.title}
           </h1>
           <p className="text-sm text-zinc-400">
             {playlist.author ? `${playlist.author} · ` : ''}
-            {playlist.tracks.length} tracks
+            {playlist.tracks.length} {isPodcastShow ? 'episodes' : 'tracks'}
           </p>
 
           {playlist.tracks.length > 0 && (

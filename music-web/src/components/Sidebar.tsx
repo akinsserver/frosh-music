@@ -190,7 +190,7 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-zinc-950/95 backdrop-blur-lg border-t border-white/10 flex items-center justify-around py-2 px-2">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-zinc-950/95 backdrop-blur-lg border-t border-white/10 flex items-center justify-around pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-2">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
@@ -207,13 +207,6 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
             </Link>
           );
         })}
-        <button
-          onClick={handleSignOut}
-          className="flex flex-col items-center gap-1 px-4 py-1 rounded-lg text-xs text-zinc-400"
-        >
-          <LogOut className="w-5 h-5" />
-          <span>Sign out</span>
-        </button>
       </nav>
     </>
   );

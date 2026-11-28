@@ -23,6 +23,7 @@ import { searchMusic, fetchArtist, fetchHome } from '@/lib/api';
 import { fetchTopReleasesThisWeek, getArtistOrPodcastHref } from '@/lib/recommendations';
 import type { SearchAllResponse, Song } from '@/types/music';
 import { TrackRow } from '@/components/TrackRow';
+import { UserAvatarButton } from '@/components/UserAvatarButton';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 
@@ -345,7 +346,10 @@ function SearchContent() {
     <div className="space-y-6 pb-8">
       {/* Search Input */}
       <div className="space-y-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-white">Search</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white">Search</h1>
+          <UserAvatarButton />
+        </div>
         <form onSubmit={handleSearchSubmit} className="relative max-w-2xl">
           <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 pointer-events-none" />
           <input

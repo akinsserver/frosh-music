@@ -83,6 +83,9 @@ export function FullScreenPlayer() {
   const [activeTab, setActiveTab] = useState<'lyrics' | 'queue'>('lyrics');
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const queueRowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchDragOriginRef = useRef<{ y: number; active: boolean } | null>(null);
   const [lyrics, setLyrics] = useState<LyricsResponse | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
@@ -874,9 +877,52 @@ export function FullScreenPlayer() {
               )}
             </>
           ) : (
-            <div className="space-y-2">
+            <div
+              className="space-y-2"
+              onTouchMove={(e) => {
+                if (draggedIdx !== null && e.touches[0]) {
+                  e.preventDefault();
+                  const y = e.touches[0].clientY;
+                  for (let i = 0; i < queue.length; i++) {
+                    const rect = queueRowRefs.current[i]?.getBoundingClientRect();
+                    if (rect && y >= rect.top && y <= rect.bottom) {
+                      if (dragOverIdx !== i) setDragOverIdx(i);
+                      break;
+                    }
+                  }
+                } else if (touchDragOriginRef.current && !touchDragOriginRef.current.active && e.touches[0]) {
+                  if (Math.abs(e.touches[0].clientY - touchDragOriginRef.current.y) > 8) {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                    }
+                  }
+                }
+              }}
+              onTouchEnd={() => {
+                if (longPressTimerRef.current) {
+                  clearTimeout(longPressTimerRef.current);
+                  longPressTimerRef.current = null;
+                }
+                if (draggedIdx !== null && dragOverIdx !== null && draggedIdx !== dragOverIdx) {
+                  reorderQueue(draggedIdx, dragOverIdx);
+                }
+                touchDragOriginRef.current = null;
+                setDraggedIdx(null);
+                setDragOverIdx(null);
+              }}
+              onTouchCancel={() => {
+                if (longPressTimerRef.current) {
+                  clearTimeout(longPressTimerRef.current);
+                  longPressTimerRef.current = null;
+                }
+                touchDragOriginRef.current = null;
+                setDraggedIdx(null);
+                setDragOverIdx(null);
+              }}
+            >
               <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/10 text-xs text-zinc-400">
-                <span>Drag to reorder songs</span>
+                <span>Drag handle or hold briefly to reorder</span>
                 <span>{queue.length} track{queue.length === 1 ? '' : 's'}</span>
               </div>
               {queue.map((item, idx) => {
@@ -886,7 +932,20 @@ export function FullScreenPlayer() {
                 return (
                   <div
                     key={`${item.id}-${idx}`}
+                    ref={(el) => {
+                      queueRowRefs.current[idx] = el;
+                    }}
                     draggable
+                    onTouchStart={(e) => {
+                      if (!e.touches[0]) return;
+                      touchDragOriginRef.current = { y: e.touches[0].clientY, active: false };
+                      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = setTimeout(() => {
+                        if (touchDragOriginRef.current) touchDragOriginRef.current.active = true;
+                        setDraggedIdx(idx);
+                        setDragOverIdx(idx);
+                      }, 150);
+                    }}
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', String(idx));
                       e.dataTransfer.effectAllowed = 'move';
@@ -916,12 +975,15 @@ export function FullScreenPlayer() {
                       setDraggedIdx(null);
                       setDragOverIdx(null);
                     }}
-                    onClick={() => playTrack(item, queue)}
+                    onClick={() => {
+                      if (draggedIdx !== null) return;
+                      playTrack(item, queue);
+                    }}
                     data-focusable="true"
-                    className={`group relative flex items-center justify-between gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${
+                    className={`group relative flex items-center justify-between gap-3 p-2.5 rounded-xl cursor-pointer transition-all select-none ${
                       isTarget ? 'border-t-2 border-emerald-400 bg-emerald-500/10' : ''
                     } ${
-                      isBeingDragged ? 'opacity-40 scale-[0.98]' : ''
+                      isBeingDragged ? 'opacity-60 scale-[0.98] ring-2 ring-emerald-400/50' : ''
                     } ${
                       isCurrent
                         ? 'bg-emerald-500/15 border border-emerald-500/30'
@@ -929,10 +991,17 @@ export function FullScreenPlayer() {
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      {/* Drag Handle */}
+                      {/* Instant Touch & Mouse Drag Handle */}
                       <div
-                        className="cursor-grab active:cursor-grabbing p-1 text-zinc-500 hover:text-white transition-colors"
+                        className="touch-none cursor-grab active:cursor-grabbing p-2 -ml-1 text-zinc-400 hover:text-white transition-colors"
                         title="Drag to sort"
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                          touchDragOriginRef.current = { y: e.touches[0]?.clientY || 0, active: true };
+                          setDraggedIdx(idx);
+                          setDragOverIdx(idx);
+                        }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <GripVertical className="w-4 h-4" />

@@ -84,7 +84,14 @@ export function PlayerBar() {
   );
 
   return (
-    <footer className="fixed bottom-14 md:static left-0 right-0 z-30 h-16 md:h-22 px-3 md:px-6 bg-zinc-950/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-between gap-4 shrink-0">
+    <footer className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:static left-0 right-0 z-30 h-16 md:h-22 px-3 md:px-6 bg-zinc-950/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-between gap-4 shrink-0">
+      {/* Mobile-only top progress bar */}
+      <div className="md:hidden absolute top-0 left-0 right-0 h-0.5 bg-white/10 pointer-events-none">
+        <div
+          className="h-full bg-emerald-400 transition-all duration-150"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
       {/* Left: Track Info */}
       <div className="flex items-center gap-3 min-w-0 w-1/2 md:w-1/4">
         <button
