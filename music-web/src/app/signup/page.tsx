@@ -98,6 +98,11 @@ export default function SignUpPage() {
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: {
+        data: {
+          access_code: verifiedCode,
+        },
+      },
     });
 
     if (signUpError) {
