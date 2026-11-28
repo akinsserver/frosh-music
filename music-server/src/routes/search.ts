@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { getInnertube, formatTrackItem, getBestThumbnail } from '../services/innertube.js';
+import { cachedFetch } from '../services/cache.js';
 import type { Song } from '../types/index.js';
 
 export const searchRouter = Router();
+const SEARCH_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 function extractPlayCount(item: any): string | undefined {
   if (typeof item?.views === 'string') return item.views;
@@ -45,6 +47,16 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const cacheKey = `search:${type}:${q.trim().toLowerCase()}`;
+    const data = await cachedFetch(cacheKey, SEARCH_CACHE_TTL, () => executeSearch(q, type));
+    res.json(data);
+  } catch (error: any) {
+    console.error('[Search API] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to search YouTube Music' });
+  }
+});
+
+async function executeSearch(q: string, type: string): Promise<any> {
     const yt = await getInnertube();
 
     if (type === 'song') {
@@ -59,8 +71,7 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      res.json({ type: 'song', results: songs });
-      return;
+      return { type: 'song', results: songs };
     }
 
     if (type === 'album') {
@@ -83,8 +94,7 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      res.json({ type: 'album', results: albums });
-      return;
+      return { type: 'album', results: albums };
     }
 
     if (type === 'artist') {
@@ -104,8 +114,7 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      res.json({ type: 'artist', results: artists });
-      return;
+      return { type: 'artist', results: artists };
     }
 
     if (type === 'podcast') {
@@ -150,8 +159,7 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      res.json({ type: 'podcast', results: podcastItems });
-      return;
+      return { type: 'podcast', results: podcastItems };
     }
 
     // Default: 'all' - smart unified search with Top Result card + categorized tracks, albums, artists, playlists
@@ -288,7 +296,7 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    res.json({
+    return {
       type: 'all',
       query: q,
       topResult,
@@ -296,9 +304,5 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
       albums,
       artists,
       playlists,
-    });
-  } catch (error: any) {
-    console.error('[Search API] Error:', error);
-    res.status(500).json({ error: error.message || 'Failed to search YouTube Music' });
-  }
-});
+    };
+}

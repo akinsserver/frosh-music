@@ -45,18 +45,14 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   });
 
   try {
-    // Revalidates the session with Supabase Auth.
+    // Fast local session check on page navigations (0ms network overhead).
+    // Sensitive API mutations (/api/user/*, /api/auth/profile) still verify via getUser().
     const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user ?? null;
 
     if (!user && !isPublicPath(pathname)) {
-      // Graceful offline check: if network fails but auth cookie exists, do not kick offline users
-      const hasAuthCookie = request.cookies.getAll().some((c) => c.name.startsWith('sb-'));
-      if (error && hasAuthCookie && error.message.toLowerCase().includes('fetch')) {
-        return supabaseResponse;
-      }
       return NextResponse.redirect(new URL('/login', request.url));
     }
 

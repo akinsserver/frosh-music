@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { searchMusic, fetchArtist, fetchHome } from '@/lib/api';
 import { fetchTopReleasesThisWeek, getArtistOrPodcastHref } from '@/lib/recommendations';
+import { getCachedData, setCachedData } from '@/lib/clientCache';
 import type { SearchAllResponse, Song } from '@/types/music';
 import { TrackRow } from '@/components/TrackRow';
 import { UserAvatarButton } from '@/components/UserAvatarButton';
@@ -104,10 +105,25 @@ function SearchContent() {
   const { playTrack, currentTrack, isPlaying } = usePlayer();
   const { history, likedSongs } = useLibrary();
 
-  // Load discovery feed for empty search state (Spotify / YouTube Music style)
+  // Load discovery feed for empty search state (0ms SWR cache)
   useEffect(() => {
     let mounted = true;
-    setDiscoverLoading(true);
+    const cached = getCachedData<{
+      tracks: Song[];
+      albums: any[];
+      artists: any[];
+      podcasts: any[];
+    }>('search:discover', 10 * 60 * 1000);
+
+    if (cached) {
+      setTopTracks(cached.data.tracks);
+      setTopAlbums(cached.data.albums);
+      setTopArtists(cached.data.artists);
+      setTopPodcasts(cached.data.podcasts);
+      if (!cached.isStale) return;
+    } else {
+      setDiscoverLoading(true);
+    }
 
     Promise.allSettled([
       fetchTopReleasesThisWeek(12),
@@ -153,21 +169,37 @@ function SearchContent() {
             }
           }
         }
-        setTopTracks(tracks.slice(0, 15));
+        const finalTracks = tracks.slice(0, 15);
+        setTopTracks(finalTracks);
 
         // 2. Top albums
+        let finalAlbums: any[] = [];
         if (albumsRes.status === 'fulfilled' && albumsRes.value && 'results' in albumsRes.value) {
-          setTopAlbums((albumsRes.value.results || []).slice(0, 10));
+          finalAlbums = (albumsRes.value.results || []).slice(0, 10);
+          setTopAlbums(finalAlbums);
         }
 
         // 3. Top artists
+        let finalArtists: any[] = [];
         if (artistsRes.status === 'fulfilled' && artistsRes.value && 'results' in artistsRes.value) {
-          setTopArtists((artistsRes.value.results || []).slice(0, 10));
+          finalArtists = (artistsRes.value.results || []).slice(0, 10);
+          setTopArtists(finalArtists);
         }
 
         // 4. Top podcasts
+        let finalPodcasts: any[] = [];
         if (podcastsRes.status === 'fulfilled' && podcastsRes.value && 'results' in podcastsRes.value) {
-          setTopPodcasts((podcastsRes.value.results || []).slice(0, 12));
+          finalPodcasts = (podcastsRes.value.results || []).slice(0, 12);
+          setTopPodcasts(finalPodcasts);
+        }
+
+        if (finalTracks.length > 0 || finalPodcasts.length > 0) {
+          setCachedData('search:discover', {
+            tracks: finalTracks,
+            albums: finalAlbums,
+            artists: finalArtists,
+            podcasts: finalPodcasts,
+          });
         }
       })
       .finally(() => {

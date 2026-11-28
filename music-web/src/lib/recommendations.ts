@@ -283,17 +283,23 @@ export async function fetchPersonalizedRecommendations(
 
   const candidatePool: Song[] = [];
 
-  for (const artist of selectedArtists) {
-    try {
-      const res = await searchMusic(artist.name, 'song');
-      const results = (res as any)?.results || [];
-      for (const track of results) {
-        if (track && track.id && !knownSongIds.has(track.id)) {
-          candidatePool.push(track);
-        }
+  const searchResults = await Promise.all(
+    selectedArtists.map(async (artist) => {
+      try {
+        const res = await searchMusic(artist.name, 'song');
+        return ((res as any)?.results || []) as Song[];
+      } catch (err) {
+        console.warn(`[RecEngine] Failed search for ${artist.name}:`, err);
+        return [] as Song[];
       }
-    } catch (err) {
-      console.warn(`[RecEngine] Failed search for ${artist.name}:`, err);
+    })
+  );
+
+  for (const results of searchResults) {
+    for (const track of results) {
+      if (track && track.id && !knownSongIds.has(track.id)) {
+        candidatePool.push(track);
+      }
     }
   }
 

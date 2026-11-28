@@ -86,6 +86,7 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
             alt={track.title}
             className="w-full h-full object-cover"
             loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
           />
         ) : (

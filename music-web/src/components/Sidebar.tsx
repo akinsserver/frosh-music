@@ -15,6 +15,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { useLibrary } from '@/context/LibraryContext';
+import { fetchSessionOnce, invalidateSessionCache } from '@/lib/clientCache';
 
 export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleTV: () => void }) {
   const pathname = usePathname();
@@ -25,13 +26,13 @@ export function Sidebar({ isTVMode, onToggleTV }: { isTVMode: boolean; onToggleT
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/session')
-      .then((res) => (res.ok ? res.json() : null))
+    fetchSessionOnce()
       .then((data) => setUserEmail(data?.user?.email ?? null))
       .catch(() => {});
   }, []);
 
   async function handleSignOut() {
+    invalidateSessionCache();
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}

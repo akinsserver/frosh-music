@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { SettingsModal } from '@/components/SettingsModal';
 import { getAvatarById } from '@/lib/avatars';
+import { fetchSessionOnce, invalidateSessionCache } from '@/lib/clientCache';
 
 export function UserAvatarButton() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -27,8 +28,7 @@ export function UserAvatarButton() {
 
     loadFromStorage();
 
-    fetch('/api/auth/session')
-      .then((res) => (res.ok ? res.json() : null))
+    fetchSessionOnce()
       .then((data) => {
         const user = data?.user;
         if (user) {
@@ -70,6 +70,7 @@ export function UserAvatarButton() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onProfileUpdated={(updated) => {
+          invalidateSessionCache();
           setUserProfile(updated);
           window.dispatchEvent(new Event('vyla-profile-updated'));
         }}

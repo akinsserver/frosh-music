@@ -32,6 +32,7 @@ export function SongBoxCard({ song, queue, className = '', fallbackContext }: So
             alt={song.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
           />
         ) : (

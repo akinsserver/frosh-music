@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { getInnertube, formatTrackItem, getBestThumbnail } from '../services/innertube.js';
+import { cachedFetch } from '../services/cache.js';
 import type { Artist, Song, Album, RelatedArtist, FeaturedPlaylist } from '../types/index.js';
 
 export const artistRouter = Router();
+const ARTIST_CACHE_TTL = 15 * 60 * 1000;
 
 artistRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -20,13 +22,14 @@ artistRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const yt = await getInnertube();
+    const response = await cachedFetch(`artist:${id}`, ARTIST_CACHE_TTL, async () => {
+      const yt = await getInnertube();
 
-    // Fetch parsed artist page and raw browse response in parallel
-    const [artistData, rawBrowse]: [any, any] = await Promise.all([
-      yt.music.getArtist(id),
-      yt.actions.execute('/browse', { browseId: id, client: 'YTMUSIC' }).catch(() => null),
-    ]);
+      // Fetch parsed artist page and raw browse response in parallel
+      const [artistData, rawBrowse]: [any, any] = await Promise.all([
+        yt.music.getArtist(id),
+        yt.actions.execute('/browse', { browseId: id, client: 'YTMUSIC' }).catch(() => null),
+      ]);
 
     const name =
       artistData.header?.title?.text ||
@@ -179,20 +182,22 @@ artistRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    const response: Artist = {
-      id,
-      name,
-      thumbnail: bestUrl,
-      description,
-      subscribers,
-      monthlyListeners,
-      topSongs,
-      allSongs,
-      albums,
-      singles,
-      featuredOn,
-      similarArtists,
-    };
+      const payload: Artist = {
+        id,
+        name,
+        thumbnail: bestUrl,
+        description,
+        subscribers,
+        monthlyListeners,
+        topSongs,
+        allSongs,
+        albums,
+        singles,
+        featuredOn,
+        similarArtists,
+      };
+      return payload;
+    });
 
     res.json(response);
   } catch (error: any) {

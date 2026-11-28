@@ -31,6 +31,7 @@ import { SongBoxCard } from '@/components/SongBoxCard';
 import { ShelfCarousel } from '@/components/ShelfCarousel';
 import { SettingsModal } from '@/components/SettingsModal';
 import { getAvatarById } from '@/lib/avatars';
+import { fetchSessionOnce, getCachedData, setCachedData } from '@/lib/clientCache';
 
 export default function HomePage() {
   const [shelves, setShelves] = useState<HomeShelf[]>([]);
@@ -63,8 +64,7 @@ export default function HomePage() {
       }
     } catch {}
 
-    fetch('/api/auth/session')
-      .then((res) => (res.ok ? res.json() : null))
+    fetchSessionOnce()
       .then((data) => {
         const user = data?.user;
         if (user) {
@@ -78,19 +78,29 @@ export default function HomePage() {
 
   const userAvatar = getAvatarById(userProfile.avatarId);
 
-  // 1. Fetch server home shelves
+  // 1. Fetch server home shelves (with 0ms SWR cache)
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
+    const cached = getCachedData<HomeShelf[]>('home:shelves', 5 * 60 * 1000);
+    if (cached) {
+      setShelves(cached.data);
+      setLoading(false);
+      if (!cached.isStale) return;
+    } else {
+      setLoading(true);
+    }
+
     fetchHome()
       .then((data) => {
         if (mounted) {
-          setShelves(data.shelves || []);
+          const list = data.shelves || [];
+          setShelves(list);
+          setCachedData('home:shelves', list);
           setError(null);
         }
       })
       .catch((err) => {
-        if (mounted) {
+        if (mounted && !cached) {
           setError(err.message || 'Could not reach music-server at http://localhost:4000');
         }
       })
@@ -103,29 +113,44 @@ export default function HomePage() {
     };
   }, []);
 
-  // 2. Fetch personalized recommendations based on user listening taste
+  // 2. Fetch personalized recommendations based on user listening taste (cached)
   useEffect(() => {
     let mounted = true;
     if (history.length === 0 && likedSongs.length === 0 && playEvents.length === 0) {
-      setPersonalizedRecs(null);
       return;
     }
 
+    const cached = getCachedData<RecommendationResult>('home:personalized', 10 * 60 * 1000);
+    if (cached) {
+      setPersonalizedRecs(cached.data);
+      if (!cached.isStale) return;
+    }
+
     fetchPersonalizedRecommendations(history, likedSongs, playEvents).then((recs) => {
-      if (mounted) setPersonalizedRecs(recs);
+      if (mounted && recs) {
+        setPersonalizedRecs(recs);
+        setCachedData('home:personalized', recs);
+      }
     });
 
     return () => {
       mounted = false;
     };
-  }, [history.length, likedSongs.length, playEvents.length]);
+  }, [history.length > 0, likedSongs.length > 0]);
 
-  // 3. Fetch community trending songs from Supabase ecosystem
+  // 3. Fetch community trending songs from Supabase ecosystem (cached)
   useEffect(() => {
     let mounted = true;
+    const cached = getCachedData<Song[]>('home:community', 10 * 60 * 1000);
+    if (cached) {
+      setCommunitySongs(cached.data);
+      if (!cached.isStale) return;
+    }
+
     fetchCommunityTrending(15).then((songs) => {
       if (mounted && songs.length > 0) {
         setCommunitySongs(songs);
+        setCachedData('home:community', songs);
       }
     });
 
@@ -134,12 +159,19 @@ export default function HomePage() {
     };
   }, []);
 
-  // 4. Fetch Top Releases & Trending Hits this week (global millions of streams)
+  // 4. Fetch Top Releases & Trending Hits this week (cached)
   useEffect(() => {
     let mounted = true;
+    const cached = getCachedData<Song[]>('home:topReleases', 10 * 60 * 1000);
+    if (cached) {
+      setTopReleases(cached.data);
+      if (!cached.isStale) return;
+    }
+
     fetchTopReleasesThisWeek(16).then((songs) => {
       if (mounted && songs.length > 0) {
         setTopReleases(songs);
+        setCachedData('home:topReleases', songs);
       }
     });
 
@@ -148,20 +180,29 @@ export default function HomePage() {
     };
   }, []);
 
-  // 5. Fetch Trending in the user's favorite genre (e.g. Afrobeats, Hip Hop, etc.)
+  // 5. Fetch Trending in the user's favorite genre (cached)
   useEffect(() => {
     let mounted = true;
     const genre = detectUserTopGenre(history, likedSongs, playEvents);
+    const cacheKey = `home:genre:${genre.toLowerCase()}`;
+    const cached = getCachedData<{ genre: string; songs: Song[] }>(cacheKey, 10 * 60 * 1000);
+    if (cached) {
+      setGenreTrending(cached.data);
+      if (!cached.isStale) return;
+    }
+
     fetchGenreTrending(genre, 16).then((songs) => {
       if (mounted && songs.length > 0) {
-        setGenreTrending({ genre, songs });
+        const payload = { genre, songs };
+        setGenreTrending(payload);
+        setCachedData(cacheKey, payload);
       }
     });
 
     return () => {
       mounted = false;
     };
-  }, [history.length, likedSongs.length, playEvents.length]);
+  }, [history.length > 0, likedSongs.length > 0]);
 
   return (
     <div className="space-y-8 pb-8">

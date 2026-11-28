@@ -3,11 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Play, Loader2, ListMusic, ArrowLeft } from 'lucide-react';
-import { fetchPlaylist } from '@/lib/api';
+import { fetchPlaylist, getStreamUrl } from '@/lib/api';
 import type { Playlist } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { TrackRow } from '@/components/TrackRow';
 import { resolveSongArtists } from '@/lib/recommendations';
+import { getCachedData, setCachedData } from '@/lib/clientCache';
 
 export default function PlaylistPage() {
   const params = useParams();
@@ -20,7 +21,16 @@ export default function PlaylistPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    const cacheKey = `playlist:${id}`;
+    const cached = getCachedData<Playlist>(cacheKey, 10 * 60 * 1000);
+    if (cached) {
+      setPlaylist(cached.data);
+      setLoading(false);
+      if (!cached.isStale) return;
+    } else {
+      setLoading(true);
+    }
+
     fetchPlaylist(id)
       .then((data) => {
         const fallbackContext = data.title || data.author;
@@ -28,10 +38,22 @@ export default function PlaylistPage() {
           ...t,
           artists: resolveSongArtists(t, fallbackContext),
         }));
-        setPlaylist({ ...data, tracks: cleanedTracks });
+        const formatted = { ...data, tracks: cleanedTracks };
+        setPlaylist(formatted);
+        setCachedData(cacheKey, formatted);
         setError(null);
+
+        // Pre-warm the first episode of a podcast show so tapping Play starts fast
+        if (
+          (id.startsWith('VLSP') || id.startsWith('MPSP') || /podcast/i.test(data.title || '')) &&
+          cleanedTracks[0]?.id
+        ) {
+          fetch(`${getStreamUrl(cleanedTracks[0].id)}/info`).catch(() => {});
+        }
       })
-      .catch((err) => setError(err.message || 'Failed to load playlist'))
+      .catch((err) => {
+        if (!cached) setError(err.message || 'Failed to load playlist');
+      })
       .finally(() => setLoading(false));
   }, [id]);
 

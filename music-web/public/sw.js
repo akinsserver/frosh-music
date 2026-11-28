@@ -1,4 +1,6 @@
-const CACHE_NAME = 'frosh-music-shell-v2';
+const CACHE_NAME = 'frosh-music-shell-v3';
+const THUMB_CACHE = 'frosh-thumb-cache-v1';
+const MAX_THUMBS = 150;
 const APP_SHELL = ['/', '/library', '/search', '/stats', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -16,7 +18,12 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME && key !== 'frosh-offline-art')
+          .filter(
+            (key) =>
+              key !== CACHE_NAME &&
+              key !== THUMB_CACHE &&
+              key !== 'frosh-offline-art'
+          )
           .map((key) => caches.delete(key))
       )
     )
@@ -32,6 +39,36 @@ self.addEventListener('fetch', (event) => {
 
   // Never intercept audio streams or API calls; IndexedDB handles offline audio
   if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
+  // External cover art thumbnails: Cache-first with cap for instant mobile scrolling
+  if (
+    url.hostname.endsWith('googleusercontent.com') ||
+    url.hostname.endsWith('ytimg.com') ||
+    url.hostname.endsWith('ggpht.com')
+  ) {
+    event.respondWith(
+      caches.open(THUMB_CACHE).then((cache) =>
+        cache.match(request).then((cached) => {
+          if (cached) return cached;
+          return fetch(request)
+            .then((res) => {
+              if (res.ok || res.type === 'opaque') {
+                const copy = res.clone();
+                cache.keys().then((keys) => {
+                  if (keys.length >= MAX_THUMBS) {
+                    cache.delete(keys[0]);
+                  }
+                  cache.put(request, copy);
+                });
+              }
+              return res;
+            })
+            .catch(() => cached);
+        })
+      )
+    );
     return;
   }
 
@@ -57,18 +94,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation / app pages: network-first, fallback to cache when offline
+  // Navigation / app pages: Stale-While-Revalidate for instant Home Screen PWA launch
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(request, copy));
-          }
-          return res;
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.match(request).then((cached) => {
+          const networkFetch = fetch(request)
+            .then((res) => {
+              if (res.ok && !res.redirected && !url.pathname.startsWith('/login') && !url.pathname.startsWith('/signup')) {
+                cache.put(request, res.clone());
+              }
+              return res;
+            })
+            .catch(() => cached || cache.match('/'));
+
+          return cached || networkFetch;
         })
-        .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+      )
     );
   }
 });

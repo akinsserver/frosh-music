@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { getInnertube, formatTrackItem, getBestThumbnail } from '../services/innertube.js';
+import { cachedFetch } from '../services/cache.js';
 import type { Playlist, Song } from '../types/index.js';
 
 export const playlistRouter = Router();
+const PLAYLIST_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 playlistRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -13,61 +15,64 @@ playlistRouter.get('/:id', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const yt = await getInnertube();
-    const playlistData: any = await yt.music.getPlaylist(id);
+    const response = await cachedFetch(`playlist:${id}`, PLAYLIST_CACHE_TTL, async () => {
+      const yt = await getInnertube();
+      const playlistData: any = await yt.music.getPlaylist(id);
 
-    const title = playlistData.header?.title?.text || playlistData.title?.text || playlistData.title || 'Playlist';
-    const author =
-      playlistData.header?.author?.name ||
-      playlistData.header?.author?.text ||
-      playlistData.header?.strapline_text_one?.text ||
-      playlistData.author?.name ||
-      playlistData.author ||
-      '';
-    const description = playlistData.header?.description?.text || playlistData.description?.text || playlistData.description;
-    const { bestUrl } = getBestThumbnail(
-      playlistData.header?.thumbnail ||
-      playlistData.header?.thumbnails ||
-      playlistData.thumbnail ||
-      playlistData.thumbnails
-    );
+      const title = playlistData.header?.title?.text || playlistData.title?.text || playlistData.title || 'Playlist';
+      const author =
+        playlistData.header?.author?.name ||
+        playlistData.header?.author?.text ||
+        playlistData.header?.strapline_text_one?.text ||
+        playlistData.author?.name ||
+        playlistData.author ||
+        '';
+      const description = playlistData.header?.description?.text || playlistData.description?.text || playlistData.description;
+      const { bestUrl } = getBestThumbnail(
+        playlistData.header?.thumbnail ||
+        playlistData.header?.thumbnails ||
+        playlistData.thumbnail ||
+        playlistData.thumbnails
+      );
 
-    const tracks: Song[] = [];
-    const isGenericAuthor = !author || ['youtube music', 'spotify', 'apple music', 'various artists', 'frosh'].some(w => author.toLowerCase().includes(w));
-    const fallbackContext = (!isGenericAuthor ? author : '') || title;
-    const contents = playlistData.contents || playlistData.items || playlistData.videos || [];
-    if (Array.isArray(contents)) {
-      for (const item of contents) {
-        const song = formatTrackItem(item, fallbackContext);
-        if (song) {
-          // Extra safety: If song still shows Unknown Artist, infer from title / author (e.g. "Presenting Asake" -> "Asake")
-          if (
-            !song.artists ||
-            song.artists.length === 0 ||
-            song.artists.every((a) => !a.name || a.name.toLowerCase() === 'unknown artist')
-          ) {
-            const contextText = `${title} ${author}`.trim();
-            const match = contextText.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
-            const suffixMatch = contextText.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
-            const resolvedName = match ? match[1].trim() : (suffixMatch ? suffixMatch[1].trim() : (!isGenericAuthor ? author.trim() : ''));
-            if (resolvedName) {
-              song.artists = [{ name: resolvedName }];
+      const tracks: Song[] = [];
+      const isGenericAuthor = !author || ['youtube music', 'spotify', 'apple music', 'various artists', 'frosh'].some(w => author.toLowerCase().includes(w));
+      const fallbackContext = (!isGenericAuthor ? author : '') || title;
+      const contents = playlistData.contents || playlistData.items || playlistData.videos || [];
+      if (Array.isArray(contents)) {
+        for (const item of contents) {
+          const song = formatTrackItem(item, fallbackContext);
+          if (song) {
+            // Extra safety: If song still shows Unknown Artist, infer from title / author (e.g. "Presenting Asake" -> "Asake")
+            if (
+              !song.artists ||
+              song.artists.length === 0 ||
+              song.artists.every((a) => !a.name || a.name.toLowerCase() === 'unknown artist')
+            ) {
+              const contextText = `${title} ${author}`.trim();
+              const match = contextText.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
+              const suffixMatch = contextText.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
+              const resolvedName = match ? match[1].trim() : (suffixMatch ? suffixMatch[1].trim() : (!isGenericAuthor ? author.trim() : ''));
+              if (resolvedName) {
+                song.artists = [{ name: resolvedName }];
+              }
             }
+            tracks.push(song);
           }
-          tracks.push(song);
         }
       }
-    }
 
-    const response: Playlist = {
-      id,
-      title,
-      author,
-      description,
-      thumbnail: bestUrl,
-      trackCount: tracks.length,
-      tracks
-    };
+      const payload: Playlist = {
+        id,
+        title,
+        author,
+        description,
+        thumbnail: bestUrl,
+        trackCount: tracks.length,
+        tracks
+      };
+      return payload;
+    });
 
     res.json(response);
   } catch (error: any) {
