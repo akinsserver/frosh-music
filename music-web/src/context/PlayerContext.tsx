@@ -81,6 +81,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const isShuffleRef = useRef(isShuffle);
   const repeatModeRef = useRef(repeatMode);
   const currentTrackRef = useRef(currentTrack);
+  const isDownloadedRef = useRef(isDownloaded);
+  const nextTrackRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    isDownloadedRef.current = isDownloaded;
+  }, [isDownloaded]);
 
   useEffect(() => {
     currentTrackRef.current = currentTrack;
@@ -142,7 +148,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Synchronous path for online streams so iOS Safari preserves user-gesture activation
-      if (!isDownloaded(track.id)) {
+      if (!isDownloadedRef.current(track.id)) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setError('You are offline and this track is not downloaded.');
           setIsPlaying(false);
@@ -163,7 +169,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       });
     },
-    [recordPlay, isDownloaded, startAudioPlayback]
+    [recordPlay, startAudioPlayback]
   );
 
   const playTrack = useCallback(
@@ -223,6 +229,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex(nextIdx);
     loadAndPlay(q[nextIdx]);
   }, [loadAndPlay]);
+
+  useEffect(() => {
+    nextTrackRef.current = nextTrack;
+  }, [nextTrack]);
 
   const prevTrack = useCallback(() => {
     const audio = audioRef.current;
@@ -353,7 +363,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // Prevent dead silence if stream has trailing empty buffer beyond true track duration
       const metaDuration = currentTrackRef.current?.duration;
       if (metaDuration && metaDuration > 0 && cur >= metaDuration - 0.5) {
-        nextTrack();
+        nextTrackRef.current?.();
       }
     };
 
@@ -378,13 +388,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     };
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => nextTrack();
+    const onEnded = () => nextTrackRef.current?.();
     const onError = () => {
       setIsLoading(false);
       setIsPlaying(false);
       const mediaErr = audio.error;
       if (mediaErr?.code === 1) return; // Ignore benign track-switch aborts
-      if (audio.src) {
+      if (audio.src && audio.src !== window.location.href) {
         const detail = mediaErr?.message || (mediaErr?.code ? `code ${mediaErr.code}` : '');
         console.error('[Player] Media error:', mediaErr?.code, mediaErr?.message, audio.src);
         setError(detail ? `Stream unavailable (${detail}).` : 'Stream interrupted or unavailable.');
@@ -412,7 +422,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [nextTrack]);
+  }, []);
 
   // Native MediaSession API for OS lock-screen, Bluetooth, & Fire TV remotes
   useEffect(() => {
