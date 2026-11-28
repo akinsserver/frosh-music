@@ -15,6 +15,8 @@ import {
   Radio,
   ListMusic,
   ArrowRight,
+  Clock,
+  X,
 } from 'lucide-react';
 import { searchMusic, fetchArtist } from '@/lib/api';
 import type { SearchAllResponse, Song } from '@/types/music';
@@ -37,6 +39,47 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [shufflingTop, setShufflingTop] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  // Load recent searches from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('frosh_recent_searches');
+      if (stored) {
+        setRecentSearches(JSON.parse(stored));
+      }
+    } catch {}
+  }, []);
+
+  const addRecentSearch = (term: string) => {
+    const t = term.trim();
+    if (!t) return;
+    setRecentSearches((prev) => {
+      const filtered = prev.filter((item) => item.toLowerCase() !== t.toLowerCase());
+      const updated = [t, ...filtered].slice(0, 8); // max 8 pills
+      try {
+        localStorage.setItem('frosh_recent_searches', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const removeRecentSearch = (term: string) => {
+    setRecentSearches((prev) => {
+      const updated = prev.filter((item) => item.toLowerCase() !== term.toLowerCase());
+      try {
+        localStorage.setItem('frosh_recent_searches', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    try {
+      localStorage.removeItem('frosh_recent_searches');
+    } catch {}
+  };
 
   const { playTrack, currentTrack, isPlaying } = usePlayer();
 
@@ -73,6 +116,9 @@ function SearchContent() {
           } else {
             setAllData(null);
             setResults(data.results || []);
+          }
+          if (trimmed.length >= 2) {
+            addRecentSearch(trimmed);
           }
         })
         .catch((err) => {
@@ -158,6 +204,11 @@ function SearchContent() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && query.trim()) {
+                addRecentSearch(query.trim());
+              }
+            }}
             placeholder="Search songs, artists, albums..."
             className="w-full pl-12 pr-4 py-3.5 rounded-full bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-sm sm:text-base"
           />
@@ -195,6 +246,50 @@ function SearchContent() {
             );
           })}
         </div>
+
+        {/* Recent Searches Pills (Max 8 items, easy quick tap) */}
+        {recentSearches.length > 0 && (
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                Recent Searches
+              </span>
+              <button
+                onClick={clearRecentSearches}
+                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              {recentSearches.map((term) => (
+                <div
+                  key={term}
+                  onClick={() => setQuery(term)}
+                  data-focusable="true"
+                  className={`group inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-all shrink-0 border ${
+                    query.toLowerCase() === term.toLowerCase()
+                      ? 'bg-emerald-500 text-zinc-950 border-emerald-500 font-semibold'
+                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <span className="truncate max-w-[130px]">{term}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeRecentSearch(term);
+                    }}
+                    className="p-0.5 rounded-full hover:bg-white/20 text-zinc-400 hover:text-white transition-colors"
+                    title="Remove from history"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quick Suggestions when empty */}
