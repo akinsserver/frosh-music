@@ -244,13 +244,21 @@ export function formatTrackItem(item: any, fallbackContext?: string): Song | nul
     }
   }
 
-  // 8. Playlist fallback context (e.g. "Presenting Asake" -> "Asake")
+  // 8. Playlist fallback context (e.g. "Presenting Asake" -> "Asake", "Asake Essentials" -> "Asake")
   if (artists.length === 0 && fallbackContext) {
-    const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+(.+)/i);
+    const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
     if (match && match[1]) {
       artists.push({ name: match[1].trim() });
-    } else if (fallbackContext && !fallbackContext.toLowerCase().includes('playlist')) {
-      artists.push({ name: fallbackContext.trim() });
+    } else {
+      const suffixMatch = fallbackContext.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
+      if (suffixMatch && suffixMatch[1]) {
+        artists.push({ name: suffixMatch[1].trim() });
+      } else {
+        const ignoreList = ['playlist', 'youtube music', 'spotify', 'apple music', 'various artists', 'frosh', 'unknown'];
+        if (!ignoreList.some((w) => fallbackContext.toLowerCase().includes(w))) {
+          artists.push({ name: fallbackContext.trim() });
+        }
+      }
     }
   }
 

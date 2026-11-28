@@ -92,7 +92,7 @@ export function getCurrentSeasonalTheme(): SeasonalTheme {
  * Robustly resolves artist names for any song item.
  * If artists is missing or only contains "Unknown Artist", tries:
  * 1. Splitting from title ("Artist - Song Title")
- * 2. Playlist / Album fallback context ("Presenting Asake" -> "Asake")
+ * 2. Playlist / Album fallback context ("Presenting Asake" -> "Asake", "Asake Essentials" -> "Asake")
  */
 export function resolveSongArtists(
   song: { title: string; artists?: { id?: string; name: string }[] },
@@ -113,18 +113,42 @@ export function resolveSongArtists(
     }
   }
 
-  // 2. Check playlist fallback context (e.g. "Presenting Asake" -> "Asake")
+  // 2. Check playlist fallback context (e.g. "Presenting Asake" -> "Asake", "This Is Asake" -> "Asake")
   if (fallbackContext) {
     const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+(.+)/i);
     if (match && match[1]) {
       return [{ name: match[1].trim() }];
     }
-    if (!fallbackContext.toLowerCase().includes('playlist')) {
+    const suffixMatch = fallbackContext.match(/(.+)\s+(?:essentials|radio|mix|hits|discography)$/i);
+    if (suffixMatch && suffixMatch[1]) {
+      return [{ name: suffixMatch[1].trim() }];
+    }
+    const ignoreList = ['playlist', 'youtube music', 'spotify', 'apple music', 'various artists', 'frosh', 'unknown'];
+    if (!ignoreList.some((w) => fallbackContext.toLowerCase().includes(w))) {
       return [{ name: fallbackContext.trim() }];
     }
   }
 
   return [{ name: 'Various Artists' }];
+}
+
+/**
+ * Returns the proper href for an artist or podcast show.
+ * If the artist ID is a YouTube Music Podcast Show (starts with MPSP, e.g. MPSPPL... or MPSPOL...),
+ * it resolves to the underlying playlist (/playlist/VL...), preventing 500 crashes.
+ */
+export function getArtistOrPodcastHref(artist?: { id?: string; name?: string }): string {
+  if (!artist) return '/';
+  if (artist.id) {
+    if (artist.id.startsWith('MPSP')) {
+      return `/playlist/VL${artist.id.slice(4)}`;
+    }
+    return `/artist/${encodeURIComponent(artist.id)}`;
+  }
+  if (artist.name && artist.name.toLowerCase() !== 'unknown artist') {
+    return `/search?q=${encodeURIComponent(artist.name)}&type=artist`;
+  }
+  return '/';
 }
 
 /**

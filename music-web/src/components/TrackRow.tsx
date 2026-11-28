@@ -7,7 +7,7 @@ import type { Song } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { useOffline } from '@/context/OfflineContext';
-import { resolveSongArtists } from '@/lib/recommendations';
+import { resolveSongArtists, getArtistOrPodcastHref } from '@/lib/recommendations';
 
 interface TrackRowProps {
   track: Song;
@@ -124,23 +124,13 @@ export function TrackRow({ track, index, queue, showIndex = false, fallbackConte
           {resolveSongArtists(track, fallbackContext).map((artist, i) => (
             <React.Fragment key={`${artist.name}-${i}`}>
               {i > 0 && <span>, </span>}
-              {artist.id ? (
-                <Link
-                  href={`/artist/${encodeURIComponent(artist.id)}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-emerald-400 hover:underline transition-colors"
-                >
-                  {artist.name}
-                </Link>
-              ) : (
-                <Link
-                  href={`/search?q=${encodeURIComponent(artist.name)}&type=artist`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-emerald-400 hover:underline transition-colors"
-                >
-                  {artist.name}
-                </Link>
-              )}
+              <Link
+                href={getArtistOrPodcastHref(artist)}
+                onClick={(e) => e.stopPropagation()}
+                className="hover:text-emerald-400 hover:underline transition-colors"
+              >
+                {artist.name}
+              </Link>
             </React.Fragment>
           ))}
         </div>

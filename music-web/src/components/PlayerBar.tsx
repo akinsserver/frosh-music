@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
+import { getArtistOrPodcastHref } from '@/lib/recommendations';
 
 function formatTime(sec: number): string {
   if (!sec || isNaN(sec)) return '0:00';
@@ -110,11 +111,7 @@ export function PlayerBar() {
                 <span key={`${a.name}-${i}`}>
                   {i > 0 && ', '}
                   <Link
-                    href={
-                      a.id
-                        ? `/artist/${encodeURIComponent(a.id)}`
-                        : `/search?q=${encodeURIComponent(a.name)}&type=artist`
-                    }
+                    href={getArtistOrPodcastHref(a)}
                     onClick={(e) => e.stopPropagation()}
                     className="hover:text-emerald-400 hover:underline transition-colors"
                   >

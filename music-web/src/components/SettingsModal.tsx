@@ -15,7 +15,13 @@ import {
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { AVATAR_PRESETS, getAvatarById, getAvatarSvgDataUri, type AvatarPreset } from '@/lib/avatars';
+import {
+  AVATAR_PRESETS,
+  getAvatarById,
+  getAvatarSvgDataUri,
+  fetchSupabaseStorageAvatars,
+  type AvatarPreset,
+} from '@/lib/avatars';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -34,6 +40,7 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [selectedAvatarId, setSelectedAvatarId] = useState<string>('neon-beats');
+  const [storageAvatars, setStorageAvatars] = useState<AvatarPreset[]>([]);
 
   // Listening party state
   const [partyCode, setPartyCode] = useState<string | null>(null);
@@ -56,6 +63,11 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
     } catch {}
 
     if (!supabase) return;
+
+    // Load custom image avatars from Supabase Storage bucket
+    fetchSupabaseStorageAvatars(supabase).then((avatars) => {
+      if (avatars.length > 0) setStorageAvatars(avatars);
+    });
 
     setLoading(true);
     supabase.auth.getUser().then(({ data }) => {
@@ -192,9 +204,13 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
         {/* Profile Card & Avatar Preview */}
         <div className="flex items-center gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
           <div
-            className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${currentAvatar.gradient} flex items-center justify-center text-3xl shadow-lg shadow-black/40 border-2 ${currentAvatar.border} shrink-0`}
+            className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${currentAvatar.gradient} flex items-center justify-center text-3xl shadow-lg shadow-black/40 border-2 ${currentAvatar.border} shrink-0 overflow-hidden`}
           >
-            {currentAvatar.emoji}
+            {currentAvatar.imageUrl ? (
+              <img src={currentAvatar.imageUrl} alt={currentAvatar.name} className="w-full h-full object-cover" />
+            ) : (
+              currentAvatar.emoji
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-base font-bold text-white truncate">
@@ -244,7 +260,7 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
             Choose Your Avatar
           </label>
           <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
-            {AVATAR_PRESETS.map((preset) => {
+            {[...storageAvatars, ...AVATAR_PRESETS].map((preset) => {
               const isSelected = selectedAvatarId === preset.id;
               return (
                 <button
@@ -262,9 +278,13 @@ export function SettingsModal({ isOpen, onClose, onProfileUpdated }: SettingsMod
                   title={preset.name}
                 >
                   <div
-                    className={`w-11 h-11 rounded-xl bg-gradient-to-br ${preset.gradient} flex items-center justify-center text-xl shadow-md`}
+                    className={`w-11 h-11 rounded-xl bg-gradient-to-br ${preset.gradient} flex items-center justify-center text-xl shadow-md overflow-hidden`}
                   >
-                    {preset.emoji}
+                    {preset.imageUrl ? (
+                      <img src={preset.imageUrl} alt={preset.name} className="w-full h-full object-cover" />
+                    ) : (
+                      preset.emoji
+                    )}
                   </div>
                   <span className="text-[10px] text-zinc-400 truncate mt-1 w-full text-center">
                     {preset.name}

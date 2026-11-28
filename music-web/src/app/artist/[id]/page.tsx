@@ -47,6 +47,13 @@ export default function ArtistPage() {
 
   useEffect(() => {
     if (!id) return;
+
+    // Defense-in-depth: Podcast show browse IDs start with MPSP and are playlists in YouTube Music
+    if (id.startsWith('MPSP')) {
+      router.replace(`/playlist/VL${id.slice(4)}`);
+      return;
+    }
+
     setLoading(true);
     fetchArtist(id)
       .then((data) => {

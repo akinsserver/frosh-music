@@ -23,6 +23,7 @@ import {
   detectUserTopGenre,
   fetchGenreTrending,
   resolveSongArtists,
+  getArtistOrPodcastHref,
   getCurrentSeasonalTheme,
   type RecommendationResult,
 } from '@/lib/recommendations';
@@ -191,9 +192,13 @@ export default function HomePage() {
             aria-label="Settings and Profile"
           >
             <div
-              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${userAvatar.gradient} flex items-center justify-center text-lg sm:text-xl shadow-inner border border-white/20`}
+              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${userAvatar.gradient} flex items-center justify-center text-lg sm:text-xl shadow-inner border border-white/20 overflow-hidden`}
             >
-              {userAvatar.emoji}
+              {userAvatar.imageUrl ? (
+                <img src={userAvatar.imageUrl} alt={userAvatar.name} className="w-full h-full object-cover" />
+              ) : (
+                userAvatar.emoji
+              )}
             </div>
           </button>
         </div>
@@ -253,11 +258,7 @@ export default function HomePage() {
                 <React.Fragment key={`${artist.name}-${idx}`}>
                   {idx > 0 && ' & '}
                   <Link
-                    href={
-                      artist.id
-                        ? `/artist/${encodeURIComponent(artist.id)}`
-                        : `/search?q=${encodeURIComponent(artist.name)}&type=artist`
-                    }
+                    href={getArtistOrPodcastHref(artist)}
                     className="text-emerald-400 hover:text-emerald-300 font-semibold underline decoration-emerald-500/40 hover:decoration-emerald-400 transition-colors"
                   >
                     {artist.name}
@@ -352,7 +353,7 @@ export default function HomePage() {
                     card.type === 'album'
                       ? `/album/${encodeURIComponent(card.id)}`
                       : card.type === 'artist'
-                      ? `/artist/${encodeURIComponent(card.id)}`
+                      ? getArtistOrPodcastHref(card)
                       : `/playlist/${encodeURIComponent(card.id)}`;
 
                   return (

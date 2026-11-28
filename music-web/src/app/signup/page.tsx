@@ -1,11 +1,17 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2, KeyRound, CheckCircle2, ArrowRight, Check, User } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { AVATAR_PRESETS, getAvatarById, getAvatarSvgDataUri } from '@/lib/avatars';
+import {
+  AVATAR_PRESETS,
+  getAvatarById,
+  getAvatarSvgDataUri,
+  fetchSupabaseStorageAvatars,
+  type AvatarPreset,
+} from '@/lib/avatars';
 
 export default function SignUpPage() {
   const [supabase] = useState(() => createClient());
@@ -18,6 +24,7 @@ export default function SignUpPage() {
   const [verifiedCode, setVerifiedCode] = useState('');
   const [name, setName] = useState('');
   const [selectedAvatarId, setSelectedAvatarId] = useState<string>('neon-beats');
+  const [storageAvatars, setStorageAvatars] = useState<AvatarPreset[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -26,6 +33,15 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Load storage avatars if available
+  useEffect(() => {
+    if (supabase) {
+      fetchSupabaseStorageAvatars(supabase).then((avatars) => {
+        if (avatars.length > 0) setStorageAvatars(avatars);
+      });
+    }
+  }, [supabase]);
 
   // Step 1: Validate Access Code against Supabase
   async function handleVerifyCode(e: React.FormEvent) {
@@ -333,7 +349,7 @@ export default function SignUpPage() {
                 </span>
               </div>
               <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1.5 rounded-xl bg-zinc-900/60 border border-white/10">
-                {AVATAR_PRESETS.map((preset) => {
+                {[...storageAvatars, ...AVATAR_PRESETS].map((preset) => {
                   const isSelected = selectedAvatarId === preset.id;
                   return (
                     <button
@@ -348,9 +364,13 @@ export default function SignUpPage() {
                       title={preset.name}
                     >
                       <div
-                        className={`w-9 h-9 rounded-lg bg-gradient-to-br ${preset.gradient} flex items-center justify-center text-lg shadow`}
+                        className={`w-9 h-9 rounded-lg bg-gradient-to-br ${preset.gradient} flex items-center justify-center text-lg shadow overflow-hidden`}
                       >
-                        {preset.emoji}
+                        {preset.imageUrl ? (
+                          <img src={preset.imageUrl} alt={preset.name} className="w-full h-full object-cover" />
+                        ) : (
+                          preset.emoji
+                        )}
                       </div>
                       <span className="text-[9px] text-zinc-400 truncate mt-1 w-full text-center">
                         {preset.name.split(' ')[0]}

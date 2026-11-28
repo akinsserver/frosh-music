@@ -23,7 +23,7 @@ export default function PlaylistPage() {
     setLoading(true);
     fetchPlaylist(id)
       .then((data) => {
-        const fallbackContext = data.author || data.title;
+        const fallbackContext = data.title || data.author;
         const cleanedTracks = (data.tracks || []).map((t) => ({
           ...t,
           artists: resolveSongArtists(t, fallbackContext),
@@ -115,7 +115,7 @@ export default function PlaylistPage() {
             index={idx}
             queue={playlist.tracks}
             showIndex
-            fallbackContext={playlist.author || playlist.title}
+            fallbackContext={playlist.title || playlist.author}
           />
         ))}
       </div>

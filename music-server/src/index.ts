@@ -18,12 +18,36 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 // Middlewares
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : ['*'];
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+  },
   methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'x-frosh-token', 'X-Requested-With'],
   exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges', 'Content-Type']
 }));
+
+// Optional server API secret verification to prevent unauthorized website scraping
+if (process.env.FROSH_API_SECRET) {
+  const secret = process.env.FROSH_API_SECRET;
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'OPTIONS' || req.path === '/health') return next();
+    const token = req.headers['x-frosh-token'] || req.query.token;
+    if (token !== secret) {
+      res.status(401).json({ error: 'Unauthorized: Invalid or missing API token' });
+      return;
+    }
+    next();
+  });
+}
 
 app.use(express.json());
 

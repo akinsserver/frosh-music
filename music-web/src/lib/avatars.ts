@@ -5,6 +5,7 @@ export interface AvatarPreset {
   gradient: string;
   border: string;
   bgHex: string;
+  imageUrl?: string;
 }
 
 export const AVATAR_PRESETS: AvatarPreset[] = [
@@ -108,15 +109,33 @@ export const AVATAR_PRESETS: AvatarPreset[] = [
 
 export function getAvatarById(id?: string | null): AvatarPreset {
   if (!id) return AVATAR_PRESETS[0];
+
+  // If the id is a direct image URL (e.g. from Supabase Storage or external link)
+  if (id.startsWith('http://') || id.startsWith('https://') || id.startsWith('data:image/') || id.startsWith('/')) {
+    return {
+      id,
+      name: 'Custom Avatar',
+      emoji: '👤',
+      imageUrl: id,
+      gradient: 'from-emerald-400 to-teal-700',
+      border: 'border-emerald-400',
+      bgHex: '#10b981',
+    };
+  }
+
   const found = AVATAR_PRESETS.find((a) => a.id === id || a.name === id);
   return found || AVATAR_PRESETS[0];
 }
 
 /**
- * Converts an avatar preset into an inline SVG data URI
+ * Converts an avatar preset into an inline SVG data URI or image URL
  * so it can be stored as avatar_url or used in standard <img src="..." />
  */
 export function getAvatarSvgDataUri(preset: AvatarPreset): string {
+  if (preset.imageUrl) {
+    return preset.imageUrl;
+  }
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
     <defs>
       <linearGradient id="grad-${preset.id}" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -129,4 +148,53 @@ export function getAvatarSvgDataUri(preset: AvatarPreset): string {
     <text x="50" y="58" font-size="40" text-anchor="middle" dominant-baseline="central">${preset.emoji}</text>
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Checks Supabase Storage buckets for uploaded avatar images.
+ * Probes common bucket names ('avatars', 'avatar', 'images', 'profile-pictures', 'profiles')
+ * and returns them as selectable AvatarPreset objects.
+ */
+export async function fetchSupabaseStorageAvatars(supabaseClient: any): Promise<AvatarPreset[]> {
+  if (!supabaseClient) return [];
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '') || '';
+  if (!supabaseUrl) return [];
+
+  const candidateBuckets = ['avatars', 'avatar', 'images', 'profile-pictures', 'profiles'];
+  const results: AvatarPreset[] = [];
+
+  for (const bucket of candidateBuckets) {
+    try {
+      const { data, error } = await supabaseClient.storage.from(bucket).list('', {
+        limit: 50,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        for (const file of data) {
+          // Filter for image files
+          if (!/\.(png|jpe?g|webp|svg|gif|avif)$/i.test(file.name)) continue;
+          
+          const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${encodeURIComponent(file.name)}`;
+          const friendlyName = file.name
+            .replace(/\.[^/.]+$/, '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (l: string) => l.toUpperCase());
+
+          results.push({
+            id: publicUrl,
+            name: friendlyName,
+            emoji: '🖼️',
+            imageUrl: publicUrl,
+            gradient: 'from-emerald-400 via-teal-500 to-emerald-700',
+            border: 'border-emerald-400',
+            bgHex: '#10b981',
+          });
+        }
+        if (results.length > 0) break;
+      }
+    } catch {}
+  }
+
+  return results;
 }

@@ -26,6 +26,7 @@ import {
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { fetchLyrics } from '@/lib/api';
+import { getArtistOrPodcastHref } from '@/lib/recommendations';
 import type { LyricsResponse } from '@/types/music';
 
 function formatTime(sec: number): string {
@@ -408,11 +409,7 @@ export function FullScreenPlayer() {
                   <span key={`${a.name}-${i}`}>
                     {i > 0 && ', '}
                     <Link
-                      href={
-                        a.id
-                          ? `/artist/${encodeURIComponent(a.id)}`
-                          : `/search?q=${encodeURIComponent(a.name)}&type=artist`
-                      }
+                      href={getArtistOrPodcastHref(a)}
                       onClick={() => setIsFullScreen(false)}
                       className="hover:text-emerald-400 hover:underline transition-colors"
                     >

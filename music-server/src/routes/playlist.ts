@@ -33,20 +33,23 @@ playlistRouter.get('/:id', async (req: Request, res: Response): Promise<void> =>
     );
 
     const tracks: Song[] = [];
-    const fallbackContext = author || title;
+    const isGenericAuthor = !author || ['youtube music', 'spotify', 'apple music', 'various artists', 'frosh'].some(w => author.toLowerCase().includes(w));
+    const fallbackContext = (!isGenericAuthor ? author : '') || title;
     const contents = playlistData.contents || playlistData.items || playlistData.videos || [];
     if (Array.isArray(contents)) {
       for (const item of contents) {
         const song = formatTrackItem(item, fallbackContext);
         if (song) {
-          // Extra safety: If song still shows Unknown Artist, infer from fallbackContext (e.g. "Presenting Asake" -> "Asake")
+          // Extra safety: If song still shows Unknown Artist, infer from title / author (e.g. "Presenting Asake" -> "Asake")
           if (
             !song.artists ||
             song.artists.length === 0 ||
             song.artists.every((a) => !a.name || a.name.toLowerCase() === 'unknown artist')
           ) {
-            const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+(.+)/i);
-            const resolvedName = match ? match[1].trim() : (fallbackContext && !fallbackContext.toLowerCase().includes('playlist') ? fallbackContext.trim() : '');
+            const contextText = `${title} ${author}`.trim();
+            const match = contextText.match(/(?:presenting|this is|best of|essentials of)\s+([^•\-|]+)/i);
+            const suffixMatch = contextText.match(/([^•\-|]+)\s+(?:essentials|radio|mix|hits|discography)/i);
+            const resolvedName = match ? match[1].trim() : (suffixMatch ? suffixMatch[1].trim() : (!isGenericAuthor ? author.trim() : ''));
             if (resolvedName) {
               song.artists = [{ name: resolvedName }];
             }

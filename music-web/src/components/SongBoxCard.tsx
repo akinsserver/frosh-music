@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Play } from 'lucide-react';
 import type { Song } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
-import { resolveSongArtists } from '@/lib/recommendations';
+import { resolveSongArtists, getArtistOrPodcastHref } from '@/lib/recommendations';
 
 interface SongBoxCardProps {
   song: Song;
@@ -73,11 +73,7 @@ export function SongBoxCard({ song, queue, className = '', fallbackContext }: So
               <React.Fragment key={`${a.name}-${i}`}>
                 {i > 0 && ', '}
                 <Link
-                  href={
-                    a.id
-                      ? `/artist/${encodeURIComponent(a.id)}`
-                      : `/search?q=${encodeURIComponent(a.name)}&type=artist`
-                  }
+                  href={getArtistOrPodcastHref(a)}
                   onClick={(e) => e.stopPropagation()}
                   className="hover:text-emerald-400 hover:underline transition-colors"
                 >
