@@ -17,10 +17,11 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Middlewares
+// Middlewares: CORS Origin Whitelist
+const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-  : ['*'];
+  : (process.env.NODE_ENV === 'production' ? defaultAllowed : ['*']);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -31,18 +32,19 @@ app.use(cors({
     }
   },
   methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'x-frosh-token', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Range', 'Authorization', 'x-api-key', 'x-frosh-token', 'X-Requested-With'],
   exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges', 'Content-Type']
 }));
 
-// Optional server API secret verification to prevent unauthorized website scraping
-if (process.env.FROSH_API_SECRET) {
-  const secret = process.env.FROSH_API_SECRET;
+// Shared Server-to-Server Secret Key Protection (MUSIC_API_KEY)
+// Any request lacking the matching x-api-key header is immediately rejected with 403 Forbidden.
+const requiredApiKey = process.env.MUSIC_API_KEY || process.env.FROSH_API_SECRET;
+if (requiredApiKey) {
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'OPTIONS' || req.path === '/health') return next();
-    const token = req.headers['x-frosh-token'] || req.query.token;
-    if (token !== secret) {
-      res.status(401).json({ error: 'Unauthorized: Invalid or missing API token' });
+    const key = req.headers['x-api-key'] || req.headers['x-frosh-token'] || req.query.api_key;
+    if (key !== requiredApiKey) {
+      res.status(403).json({ error: 'Forbidden: Invalid or missing API key' });
       return;
     }
     next();
