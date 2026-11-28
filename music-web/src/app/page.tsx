@@ -79,6 +79,7 @@ export default function HomePage() {
                   src={song.thumbnail}
                   alt={song.title}
                   className="w-12 h-12 rounded-lg object-cover bg-zinc-800 shrink-0"
+                  referrerPolicy="no-referrer"
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-white truncate">{song.title}</p>
@@ -163,6 +164,7 @@ export default function HomePage() {
                               alt={card.title}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                               loading="lazy"
+                              referrerPolicy="no-referrer"
                             />
                           )}
                           <div className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-emerald-500 text-zinc-950 flex items-center justify-center opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all shadow-xl">

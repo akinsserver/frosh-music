@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Play, Loader2, Disc3, Download, CheckCircle2 } from 'lucide-react';
+import { Play, Loader2, Disc3, Download, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { fetchAlbum } from '@/lib/api';
 import type { Album } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
@@ -12,6 +12,7 @@ import { TrackRow } from '@/components/TrackRow';
 
 export default function AlbumPage() {
   const params = useParams();
+  const router = useRouter();
   const id = decodeURIComponent(String(params.id || ''));
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +50,18 @@ export default function AlbumPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      {/* Back Button */}
+      <button
+        onClick={() => router.back()}
+        data-focusable="true"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors"
+        title="Go back"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        <span>Back</span>
+      </button>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 pb-6 border-b border-white/10">
         <div className="w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden shadow-2xl bg-zinc-800 shrink-0">

@@ -84,6 +84,7 @@ export function TrackRow({ track, index, queue, showIndex = false }: TrackRowPro
             alt={track.title}
             className="w-full h-full object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="w-full h-full bg-zinc-800" />

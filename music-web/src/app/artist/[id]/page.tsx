@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Play,
@@ -20,6 +20,7 @@ import {
   Heart,
   Share2,
   Check,
+  ArrowLeft,
 } from 'lucide-react';
 import { fetchArtist, fetchAlbum } from '@/lib/api';
 import type { Artist, Song, Album } from '@/types/music';
@@ -30,6 +31,7 @@ type TabType = 'overview' | 'songs' | 'albums' | 'singles' | 'similar';
 
 export default function ArtistPage() {
   const params = useParams();
+  const router = useRouter();
   const id = decodeURIComponent(String(params.id || ''));
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,7 +168,19 @@ export default function ArtistPage() {
   return (
     <div className="space-y-8 pb-16">
       {/* ── Ambient Hero Banner ──────────────────────────────────────────────── */}
-      <div className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8 px-4 sm:px-8 pt-12 pb-8 overflow-hidden rounded-b-3xl border-b border-white/10">
+      <div className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8 px-4 sm:px-8 pt-6 pb-8 overflow-hidden rounded-b-3xl border-b border-white/10">
+        {/* Back Button */}
+        <div className="max-w-7xl mx-auto mb-4 relative z-10">
+          <button
+            onClick={() => router.back()}
+            data-focusable="true"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white backdrop-blur-md transition-colors"
+            title="Go back"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back</span>
+          </button>
+        </div>
         {/* Blurred ambient background glow */}
         {artist.thumbnail && (
           <div

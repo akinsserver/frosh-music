@@ -78,6 +78,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const queueIndexRef = useRef(queueIndex);
   const isShuffleRef = useRef(isShuffle);
   const repeatModeRef = useRef(repeatMode);
+  const currentTrackRef = useRef(currentTrack);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   useEffect(() => {
     queueRef.current = queue;
@@ -307,9 +312,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!audio) return;
     audio.volume = 0.85;
 
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
+    const onTimeUpdate = () => {
+      const cur = audio.currentTime || 0;
+      setCurrentTime(cur);
+
+      // Prevent dead silence if stream has trailing empty buffer beyond true track duration
+      const metaDuration = currentTrackRef.current?.duration;
+      if (metaDuration && metaDuration > 0 && cur >= metaDuration - 0.5) {
+        nextTrack();
+      }
+    };
+
     const onDurationChange = () => {
       if (audio.duration && !isNaN(audio.duration)) {
+        const metaDuration = currentTrackRef.current?.duration;
+        // YouTube VBR audio streams often report inflated durations in browsers.
+        // If metadata duration is known, preserve the true song length.
+        if (metaDuration && metaDuration > 0) {
+          if (Math.abs(audio.duration - metaDuration) > 4) {
+            setDuration(metaDuration);
+            return;
+          }
+        }
         setDuration(audio.duration);
       }
     };
