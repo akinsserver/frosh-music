@@ -7,6 +7,7 @@ import { fetchPlaylist } from '@/lib/api';
 import type { Playlist } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { TrackRow } from '@/components/TrackRow';
+import { resolveSongArtists } from '@/lib/recommendations';
 
 export default function PlaylistPage() {
   const params = useParams();
@@ -22,7 +23,12 @@ export default function PlaylistPage() {
     setLoading(true);
     fetchPlaylist(id)
       .then((data) => {
-        setPlaylist(data);
+        const fallbackContext = data.author || data.title;
+        const cleanedTracks = (data.tracks || []).map((t) => ({
+          ...t,
+          artists: resolveSongArtists(t, fallbackContext),
+        }));
+        setPlaylist({ ...data, tracks: cleanedTracks });
         setError(null);
       })
       .catch((err) => setError(err.message || 'Failed to load playlist'))

@@ -22,9 +22,10 @@ playlistRouter.get('/:id', async (req: Request, res: Response): Promise<void> =>
     const { bestUrl } = getBestThumbnail(playlistData.header?.thumbnails || playlistData.thumbnails);
 
     const tracks: Song[] = [];
+    const fallbackContext = author || title;
     if (playlistData.contents) {
       for (const item of playlistData.contents) {
-        const song = formatTrackItem(item);
+        const song = formatTrackItem(item, fallbackContext);
         if (song) tracks.push(song);
       }
     }

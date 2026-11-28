@@ -5,16 +5,19 @@ import Link from 'next/link';
 import { Play } from 'lucide-react';
 import type { Song } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
+import { resolveSongArtists } from '@/lib/recommendations';
 
 interface SongBoxCardProps {
   song: Song;
   queue: Song[];
   className?: string;
+  fallbackContext?: string;
 }
 
-export function SongBoxCard({ song, queue, className = '' }: SongBoxCardProps) {
+export function SongBoxCard({ song, queue, className = '', fallbackContext }: SongBoxCardProps) {
   const { playTrack, currentTrack, isPlaying } = usePlayer();
   const isCurrent = currentTrack?.id === song.id;
+  const displayArtists = resolveSongArtists(song, fallbackContext);
 
   return (
     <div
@@ -64,16 +67,19 @@ export function SongBoxCard({ song, queue, className = '' }: SongBoxCardProps) {
         >
           {song.title}
         </p>
-        <p className="text-xs text-zinc-400 truncate mt-0.5">
-          {song.artists && song.artists.length > 0
-            ? song.artists.map((a, i) => (
-                <span key={`${a.name}-${i}`}>
-                  {i > 0 && ', '}
-                  {a.name}
-                </span>
-              ))
-            : 'Various Artists'}
-        </p>
+        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+          <p className="text-xs text-zinc-400 truncate">
+            {displayArtists.map((a) => a.name).join(', ')}
+          </p>
+          {song.playCount && (
+            <>
+              <span className="text-zinc-600 text-[10px] shrink-0">•</span>
+              <span className="text-[11px] text-emerald-400 font-medium shrink-0">
+                {song.playCount}
+              </span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

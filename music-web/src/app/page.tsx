@@ -2,13 +2,27 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Play, Search, Sparkles, Loader2, AlertCircle, Users, Flame } from 'lucide-react';
+import {
+  Play,
+  Search,
+  Sparkles,
+  Loader2,
+  AlertCircle,
+  Users,
+  Flame,
+  TrendingUp,
+  Radio,
+} from 'lucide-react';
 import { fetchHome, isSongItem } from '@/lib/api';
 import type { HomeShelf, Song, HomeCardItem } from '@/types/music';
 import { useLibrary } from '@/context/LibraryContext';
 import {
   fetchPersonalizedRecommendations,
   fetchCommunityTrending,
+  fetchTopReleasesThisWeek,
+  detectUserTopGenre,
+  fetchGenreTrending,
+  resolveSongArtists,
   type RecommendationResult,
 } from '@/lib/recommendations';
 import { SongBoxCard } from '@/components/SongBoxCard';
@@ -21,6 +35,8 @@ export default function HomePage() {
 
   const [personalizedRecs, setPersonalizedRecs] = useState<RecommendationResult | null>(null);
   const [communitySongs, setCommunitySongs] = useState<Song[]>([]);
+  const [topReleases, setTopReleases] = useState<Song[]>([]);
+  const [genreTrending, setGenreTrending] = useState<{ genre: string; songs: Song[] } | null>(null);
 
   const { history, likedSongs, playEvents } = useLibrary();
 
@@ -80,6 +96,35 @@ export default function HomePage() {
     };
   }, []);
 
+  // 4. Fetch Top Releases & Trending Hits this week (global millions of streams)
+  useEffect(() => {
+    let mounted = true;
+    fetchTopReleasesThisWeek(16).then((songs) => {
+      if (mounted && songs.length > 0) {
+        setTopReleases(songs);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // 5. Fetch Trending in the user's favorite genre (e.g. Afrobeats, Hip Hop, etc.)
+  useEffect(() => {
+    let mounted = true;
+    const genre = detectUserTopGenre(history, likedSongs, playEvents);
+    fetchGenreTrending(genre, 16).then((songs) => {
+      if (mounted && songs.length > 0) {
+        setGenreTrending({ genre, songs });
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [history.length, likedSongs.length, playEvents.length]);
+
   return (
     <div className="space-y-8 pb-8">
       {/* Top Bar */}
@@ -111,7 +156,37 @@ export default function HomePage() {
         </ShelfCarousel>
       )}
 
-      {/* 2. You May Also Like (Tailored Algorithmic Recommendations) */}
+      {/* 2. Top Releases & Hits (This Week's Global Bestsellers & New Releases) */}
+      {topReleases.length > 0 && (
+        <ShelfCarousel
+          title="Top Releases & Hits"
+          subtitle="The most streamed tracks and major releases trending worldwide this week"
+          icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
+        >
+          {topReleases.map((song) => (
+            <SongBoxCard key={`top-${song.id}`} song={song} queue={topReleases} />
+          ))}
+        </ShelfCarousel>
+      )}
+
+      {/* 3. Trending in Favorite Genre (Tailored to User's Style, e.g. Afrobeats, Hip Hop) */}
+      {genreTrending && genreTrending.songs.length > 0 && (
+        <ShelfCarousel
+          title={`Trending in ${genreTrending.genre}`}
+          subtitle={`Hottest releases and top weekly streams in ${genreTrending.genre}`}
+          icon={<Radio className="w-4 h-4 text-emerald-400" />}
+        >
+          {genreTrending.songs.map((song) => (
+            <SongBoxCard
+              key={`genre-${genreTrending.genre}-${song.id}`}
+              song={song}
+              queue={genreTrending.songs}
+            />
+          ))}
+        </ShelfCarousel>
+      )}
+
+      {/* 4. You May Also Like (Tailored Algorithmic Recommendations) */}
       {personalizedRecs && personalizedRecs.songs.length > 0 && (
         <ShelfCarousel
           title={personalizedRecs.shelfTitle}
@@ -128,7 +203,7 @@ export default function HomePage() {
         </ShelfCarousel>
       )}
 
-      {/* 3. Other Users Liked (Supabase Ecosystem Community Favorites) */}
+      {/* 5. Other Users Liked (Supabase Ecosystem Community Favorites) */}
       {communitySongs.length > 0 && (
         <ShelfCarousel
           title="Other Users Liked"
@@ -166,7 +241,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 4. Categorized InnerTube Home Shelves (Swipeable Horizontal Form) */}
+      {/* 6. Categorized InnerTube Home Shelves (Swipeable Horizontal Form) */}
       {!loading &&
         shelves.map((shelf, idx) => {
           const songItems = shelf.items.filter(isSongItem) as Song[];
@@ -184,6 +259,7 @@ export default function HomePage() {
                     key={`shelf-${shelf.title}-${song.id}`}
                     song={song}
                     queue={songItems}
+                    fallbackContext={shelf.title}
                   />
                 ))}
 

@@ -16,6 +16,45 @@ export interface RecommendationResult {
 }
 
 /**
+ * Robustly resolves artist names for any song item.
+ * If artists is missing or only contains "Unknown Artist", tries:
+ * 1. Splitting from title ("Artist - Song Title")
+ * 2. Playlist / Album fallback context ("Presenting Asake" -> "Asake")
+ */
+export function resolveSongArtists(
+  song: { title: string; artists?: { id?: string; name: string }[] },
+  fallbackContext?: string
+): { id?: string; name: string }[] {
+  const currentArtists = song.artists || [];
+  const valid = currentArtists.filter(
+    (a) => a && a.name && a.name.trim() !== '' && a.name.toLowerCase() !== 'unknown artist'
+  );
+  if (valid.length > 0) return valid;
+
+  // 1. Check title for "Artist - Title" pattern
+  const rawTitle = song.title || '';
+  if (rawTitle.includes(' - ') || rawTitle.includes(' – ') || rawTitle.includes(' — ')) {
+    const parts = rawTitle.split(/\s*[-–—]\s*/);
+    if (parts.length >= 2 && parts[0].trim()) {
+      return [{ name: parts[0].trim() }];
+    }
+  }
+
+  // 2. Check playlist fallback context (e.g. "Presenting Asake" -> "Asake")
+  if (fallbackContext) {
+    const match = fallbackContext.match(/(?:presenting|this is|best of|essentials of)\s+(.+)/i);
+    if (match && match[1]) {
+      return [{ name: match[1].trim() }];
+    }
+    if (!fallbackContext.toLowerCase().includes('playlist')) {
+      return [{ name: fallbackContext.trim() }];
+    }
+  }
+
+  return [{ name: 'Various Artists' }];
+}
+
+/**
  * Computes the user's top artists by combining:
  * 1. Liked songs (+5 score)
  * 2. Recent listening history (+2 score, +4 if in last 7 days)
@@ -75,8 +114,51 @@ export function getUserTasteProfile(
 }
 
 /**
+ * Detects the user's favorite musical genre based on listening taste profile
+ */
+export function detectUserTopGenre(
+  history: Song[] = [],
+  likedSongs: Song[] = [],
+  playEvents: PlayHistoryEvent[] = []
+): string {
+  const affinities = getUserTasteProfile(history, likedSongs, playEvents);
+  const artistNames = affinities.map((a) => a.name.toLowerCase());
+
+  const AFROBEATS = [
+    'asake', 'wizkid', 'burna boy', 'davido', 'tiwa savage', 'rema', 'olamide',
+    'ayra starr', 'fireboy dml', 'blaqbonez', 'tems', 'kizz daniel', 'seyi vibez',
+    'ruger', 'victony', 'ckay', 'joeboy', 'bnxn', 'shallipopi', 'flavour', 'omah lay',
+  ];
+
+  const HIP_HOP = [
+    'drake', '21 savage', 'travis scott', 'metro boomin', 'kendrick lamar',
+    'future', 'kanye west', 'lil baby', 'eminem', 'j. cole', 'playboi carti',
+    'lil wayne', 'gunna', 'young thug', 'dr. dre', 'snoop dogg', '50 cent',
+  ];
+
+  const RNB = [
+    'the weeknd', 'sza', 'frank ocean', 'chris brown', 'brent faiyaz',
+    'daniel caesar', 'summer walker', 'bryson tiller', 'giveon', 'partynextdoor',
+  ];
+
+  const POP = [
+    'taylor swift', 'billie eilish', 'ariana grande', 'justin bieber', 'dua lipa',
+    'bruno mars', 'ed sheeran', 'olivia rodrigo', 'harry styles', 'rihanna',
+    'sabrina carpenter', 'michael jackson',
+  ];
+
+  for (const name of artistNames) {
+    if (AFROBEATS.some((a) => name.includes(a))) return 'Afrobeats';
+    if (HIP_HOP.some((a) => name.includes(a))) return 'Hip Hop';
+    if (RNB.some((a) => name.includes(a))) return 'R&B';
+    if (POP.some((a) => name.includes(a))) return 'Pop';
+  }
+
+  return 'Afrobeats'; // Default genre if no history yet
+}
+
+/**
  * Fetches "You May Also Like" personalized recommendations
- * Queries related songs based on the user's top affinities, filtering out already known tracks.
  */
 export async function fetchPersonalizedRecommendations(
   history: Song[] = [],
@@ -86,7 +168,6 @@ export async function fetchPersonalizedRecommendations(
   const affinities = getUserTasteProfile(history, likedSongs, playEvents);
   if (affinities.length === 0) return null;
 
-  // Select top 1 to 2 artists
   const topArtists = affinities.slice(0, 2);
   const knownSongIds = new Set([
     ...history.map((s) => s.id),
@@ -111,7 +192,6 @@ export async function fetchPersonalizedRecommendations(
 
   if (candidatePool.length === 0) return null;
 
-  // Interleave and take up to 14 tracks
   const seenIds = new Set<string>();
   const uniqueCandidates: Song[] = [];
   for (const song of candidatePool) {
@@ -133,8 +213,35 @@ export async function fetchPersonalizedRecommendations(
 }
 
 /**
+ * Fetches Top Releases & Trending Hits this week (with millions of views/streams)
+ */
+export async function fetchTopReleasesThisWeek(limit: number = 15): Promise<Song[]> {
+  try {
+    const res = await searchMusic('Trending Songs This Week', 'song');
+    const results = (res as any)?.results || [];
+    return results.slice(0, limit);
+  } catch (err) {
+    console.warn('[TopReleases] Failed to fetch top releases:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetches trending songs in the user's favorite genre
+ */
+export async function fetchGenreTrending(genre: string, limit: number = 15): Promise<Song[]> {
+  try {
+    const res = await searchMusic(`Trending ${genre} Hits`, 'song');
+    const results = (res as any)?.results || [];
+    return results.slice(0, limit);
+  } catch (err) {
+    console.warn(`[GenreTrending] Failed to fetch trending for ${genre}:`, err);
+    return [];
+  }
+}
+
+/**
  * Fetches "Other Users Liked" from Supabase ecosystem
- * Aggregates listening and likes across all user libraries.
  */
 export async function fetchCommunityTrending(limit: number = 15): Promise<Song[]> {
   try {

@@ -7,6 +7,7 @@ import type { Song } from '@/types/music';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { useOffline } from '@/context/OfflineContext';
+import { resolveSongArtists } from '@/lib/recommendations';
 
 interface TrackRowProps {
   track: Song;
@@ -119,7 +120,7 @@ export function TrackRow({ track, index, queue, showIndex = false }: TrackRowPro
           )}
         </div>
         <div className="text-xs text-zinc-400 truncate mt-0.5 flex items-center gap-1">
-          {track.artists.map((artist, i) => (
+          {resolveSongArtists(track).map((artist, i) => (
             <React.Fragment key={`${artist.name}-${i}`}>
               {i > 0 && <span>, </span>}
               {artist.id ? (
