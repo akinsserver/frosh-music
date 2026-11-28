@@ -3,26 +3,31 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, KeyRound, CheckCircle2, ArrowRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 
 export default function SignUpPage() {
-  // One browser client for the life of this page; null when Supabase is not
-  // configured (env vars missing).
   const [supabase] = useState(() => createClient());
   const router = useRouter();
+
+  // Step 1: 'code' (Verify Access Code) | Step 2: 'account' (Email + Password)
+  const [step, setStep] = useState<'code' | 'account'>('code');
+
+  const [accessCode, setAccessCode] = useState('');
+  const [verifiedCode, setVerifiedCode] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [inviteCode, setInviteCode] = useState('');
+
+  const [codeValidating, setCodeValidating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Step 1: Validate Access Code against Supabase
+  async function handleVerifyCode(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setNotice(null);
 
     if (!supabase) {
       setError(
@@ -31,29 +36,65 @@ export default function SignUpPage() {
       return;
     }
 
-    const code = inviteCode.trim();
+    const code = accessCode.trim();
     if (!code) {
-      setError('Enter your invite code to sign up.');
+      setError('Please enter an access code to proceed.');
+      return;
+    }
+
+    setCodeValidating(true);
+
+    try {
+      // Check validate_access_code RPC first, fall back to validate_invite_code
+      let isValid = false;
+      const { data: accessValid, error: accessErr } = await supabase.rpc('validate_access_code', {
+        p_code: code,
+      });
+
+      if (!accessErr && accessValid) {
+        isValid = true;
+      } else {
+        const { data: inviteValid } = await supabase.rpc('validate_invite_code', {
+          p_code: code,
+        });
+        if (inviteValid) isValid = true;
+      }
+
+      setCodeValidating(false);
+
+      if (!isValid) {
+        setError("Invalid access code. Please check your code or request one from the owner.");
+        return;
+      }
+
+      // Code is valid! Transition to step 2 (account credentials)
+      setVerifiedCode(code);
+      setStep('account');
+    } catch (err: unknown) {
+      setCodeValidating(false);
+      setError(err instanceof Error ? err.message : 'Failed to verify code. Please try again.');
+    }
+  }
+
+  // Step 2: Create Account in Supabase Auth
+  async function handleCreateAccount(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setNotice(null);
+
+    if (!supabase) {
+      setError("Supabase client is not available.");
+      return;
+    }
+
+    if (!verifiedCode) {
+      setError('Please verify your access code first.');
+      setStep('code');
       return;
     }
 
     setLoading(true);
 
-    // 1. Check the invite code against Supabase. The code itself is never
-    //    stored anywhere in this app — it is hashed inside the database and
-    //    only a yes/no comes back.
-    const { data: codeValid, error: codeError } = await supabase.rpc(
-      'validate_invite_code',
-      { p_code: code }
-    );
-
-    if (codeError || !codeValid) {
-      setLoading(false);
-      setError("That invite code isn't valid. Check it and try again.");
-      return;
-    }
-
-    // 2. Create the account in Supabase Auth.
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -69,31 +110,33 @@ export default function SignUpPage() {
       return;
     }
 
-    // 3. Count one use of the code (best-effort), then clear it from the form
-    //    so it is never kept around in the page.
+    // Record code use (best-effort)
     try {
-      await supabase.rpc('record_invite_code_use', { p_code: code });
+      await supabase.rpc('record_access_code_use', { p_code: verifiedCode });
     } catch {
-      // Uses are informational only; a failed count must not block sign-up.
+      try {
+        await supabase.rpc('record_invite_code_use', { p_code: verifiedCode });
+      } catch {
+        // Ignored
+      }
     }
-    setInviteCode('');
+
     setLoading(false);
 
     if (data.session) {
-      // Email confirmation is off: signed in immediately, straight to Home.
+      // Email confirmation is off: signed in immediately, straight to Home
       router.push('/');
       router.refresh();
     } else {
-      // Email confirmation is on: the account exists but needs the emailed link.
-      setNotice(
-        'Account created. Check your email for the confirmation link, then sign in.'
-      );
+      // Email confirmation is on: the account exists but needs confirmation email
+      setNotice('Account created! Check your email for the confirmation link, then sign in.');
     }
   }
 
   return (
     <div className="min-h-dvh flex items-center justify-center px-4 py-10 bg-zinc-950">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.03] p-6 sm:p-8">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 backdrop-blur-xl">
+        {/* Brand Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="w-11 h-11 rounded-xl overflow-hidden bg-zinc-900 border border-emerald-500/30 flex items-center justify-center shrink-0">
             <img src="/icon.svg" alt="Frosh Music" className="w-full h-full object-cover" />
@@ -106,17 +149,59 @@ export default function SignUpPage() {
           </div>
         </div>
 
-        <h1 className="text-xl font-bold text-white">Sign up</h1>
-        <p className="text-sm text-zinc-400 mt-1 mb-6">
-          Sign-ups are invite-only. You&apos;ll need a code from the owner.
-        </p>
+        {/* Step Indicator & Title */}
+        {step === 'code' ? (
+          <>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center justify-center">
+                1
+              </span>
+              <h1 className="text-xl font-bold text-white">Access Code</h1>
+            </div>
+            <p className="text-sm text-zinc-400 mb-6">
+              Frosh Music is private & invite-only. Enter your access code to unlock account registration.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="w-5 h-5 rounded-full bg-emerald-500 text-zinc-950 text-xs font-semibold flex items-center justify-center">
+                2
+              </span>
+              <h1 className="text-xl font-bold text-white">Create Account</h1>
+            </div>
+            <p className="text-sm text-zinc-400 mb-4">
+              Enter your email and choose a password to sign in with later.
+            </p>
 
+            {/* Verified code badge */}
+            <div className="mb-5 flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
+              <span className="flex items-center gap-1.5 font-medium truncate">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                Code: <span className="tracking-wide uppercase font-mono">{verifiedCode}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('code');
+                  setError(null);
+                }}
+                className="text-emerald-400 underline hover:text-emerald-300 shrink-0 ml-2"
+              >
+                Change
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Error message */}
         {error && (
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-200">
             {error}
           </div>
         )}
 
+        {/* Notice message */}
         {notice && (
           <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-200">
             {notice}{' '}
@@ -126,79 +211,102 @@ export default function SignUpPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                required
-                minLength={6}
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                className="w-full px-3.5 py-2.5 pr-11 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                title={showPassword ? 'Hide password' : 'Show password'}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
-              >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
+        {/* Step 1 Form: Access Code */}
+        {step === 'code' && (
+          <form onSubmit={handleVerifyCode} className="space-y-4">
+            <div>
+              <label htmlFor="access-code" className="block text-sm font-medium text-zinc-300 mb-1.5">
+                Access Code
+              </label>
+              <div className="relative">
+                <input
+                  id="access-code"
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="off"
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  placeholder="e.g. VIP-2026"
+                  className="w-full px-3.5 py-2.5 pl-10 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 uppercase tracking-wider font-mono text-sm"
+                />
+                <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+              <p className="text-xs text-zinc-500 mt-1.5">
+                Don&apos;t have a code? Ask the server owner for an invitation.
+              </p>
             </div>
-          </div>
 
-          <div>
-            <label htmlFor="invite-code" className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Invite code
-            </label>
-            <input
-              id="invite-code"
-              type="text"
-              required
-              autoComplete="off"
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)}
-              placeholder="Enter your invite code"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 uppercase"
-            />
-            <p className="text-xs text-zinc-500 mt-1.5">
-              Any one of the owner&apos;s active codes works.
-            </p>
-          </div>
+            <button
+              type="submit"
+              disabled={codeValidating || !accessCode.trim()}
+              className="w-full py-2.5 rounded-full bg-emerald-500 text-zinc-950 font-semibold text-sm hover:bg-emerald-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {codeValidating && <Loader2 className="w-4 h-4 animate-spin" />}
+              <span>{codeValidating ? 'Verifying code…' : 'Continue'}</span>
+              {!codeValidating && <ArrowRight className="w-4 h-4" />}
+            </button>
+          </form>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded-full bg-emerald-500 text-zinc-950 font-semibold text-sm hover:bg-emerald-400 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {loading ? 'Creating account…' : 'Sign up'}
-          </button>
-        </form>
+        {/* Step 2 Form: Email & Password */}
+        {step === 'account' && (
+          <form onSubmit={handleCreateAccount} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-zinc-300 mb-1.5">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-zinc-300 mb-1.5">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full px-3.5 py-2.5 pr-11 rounded-xl bg-zinc-900 border border-white/15 text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-full bg-emerald-500 text-zinc-950 font-semibold text-sm hover:bg-emerald-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loading ? 'Creating account…' : 'Complete Sign Up'}
+            </button>
+          </form>
+        )}
 
         <p className="text-sm text-zinc-400 text-center mt-6">
           Already have an account?{' '}

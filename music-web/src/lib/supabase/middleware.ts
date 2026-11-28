@@ -1,10 +1,9 @@
 // Session refresh + route gate, run by src/proxy.ts before every page.
 //
 // Only accounts that exist in Supabase Auth can hold a valid session, so
-// `getUser()` is the whole sign-in check: an unknown user can never get in,
+// `getUser()` is the sign-in check: an unknown user can never get in,
 // and there is no user list anywhere in this app to compare against.
-//
-// Auth pages that do not require a session.
+
 const PUBLIC_PATHS = ['/login', '/signup'];
 const PUBLIC_PREFIXES = ['/auth/'];
 
@@ -45,18 +44,31 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     },
   });
 
-  // Revalidates the session with Supabase Auth.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  try {
+    // Revalidates the session with Supabase Auth.
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
 
-  if (!user && !isPublicPath(pathname)) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
+    if (!user && !isPublicPath(pathname)) {
+      // Graceful offline check: if network fails but auth cookie exists, do not kick offline users
+      const hasAuthCookie = request.cookies.getAll().some((c) => c.name.startsWith('sb-'));
+      if (error && hasAuthCookie && error.message.toLowerCase().includes('fetch')) {
+        return supabaseResponse;
+      }
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
 
-  // Signed-in users never need the auth pages.
-  if (user && (pathname === '/login' || pathname === '/signup')) {
-    return NextResponse.redirect(new URL('/', request.url));
+    // Signed-in users never need the auth pages.
+    if (user && (pathname === '/login' || pathname === '/signup')) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+  } catch {
+    const hasAuthCookie = request.cookies.getAll().some((c) => c.name.startsWith('sb-'));
+    if (!hasAuthCookie && !isPublicPath(pathname)) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
   }
 
   return supabaseResponse;
