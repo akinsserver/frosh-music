@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
-import { getArtistOrPodcastHref } from '@/lib/recommendations';
+import { getArtistOrPodcastHref, getCleanDisplayArtists } from '@/lib/recommendations';
 
 function formatTime(sec: number): string {
   if (!sec || isNaN(sec)) return '0:00';
@@ -120,7 +120,7 @@ export function PlayerBar() {
             {error ? (
               <span className="text-red-400">{error}</span>
             ) : (
-              currentTrack.artists.map((a, i) => (
+              getCleanDisplayArtists(currentTrack.artists, isPodcast).map((a, i) => (
                 <span key={`${a.name}-${i}`}>
                   {i > 0 && ', '}
                   <Link

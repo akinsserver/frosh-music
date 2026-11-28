@@ -150,6 +150,35 @@ export function getArtistOrPodcastHref(artist?: { id?: string; name?: string }):
   return '/';
 }
 
+const METADATA_NOISE_REGEX =
+  /^(?:episode\s*\d*|podcast|full\s*show|\d+\s*(?:views|plays)|[\d.,]+[kmb]\s*(?:views|plays)|\d+\s*(?:hr|hrs|hour|hours|min|mins|minute|minutes|sec|secs|h|m)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,?\s*\d{4})?|\d{4}|\d+\s+(?:day|week|month|year|hour)s?\s+ago)$/i;
+
+/**
+ * Filters out date/duration/view-count chips that YouTube Music attaches to podcast episodes,
+ * returning only clean artist/show names. For podcasts, returns only the primary show/host name.
+ */
+export function getCleanDisplayArtists(
+  artists: { id?: string; name: string }[] = [],
+  isPodcast = false
+): { id?: string; name: string }[] {
+  const cleaned = artists.filter((a) => {
+    const n = (a?.name || '').trim();
+    if (!n) return false;
+    if (METADATA_NOISE_REGEX.test(n)) return false;
+    if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(n)) return false;
+    return true;
+  });
+
+  if (isPodcast) {
+    // Only show the primary podcast show/host name (prefer one with an ID)
+    const withId = cleaned.find((a) => a.id);
+    if (withId) return [withId];
+    return cleaned.length > 0 ? [cleaned[0]] : [{ name: 'Podcast' }];
+  }
+
+  return cleaned.length > 0 ? cleaned : artists;
+}
+
 /**
  * Computes the user's top artists by combining:
  * 1. Liked songs (+5 score)

@@ -24,6 +24,8 @@ import { fetchTopReleasesThisWeek, getArtistOrPodcastHref } from '@/lib/recommen
 import { getCachedData, setCachedData } from '@/lib/clientCache';
 import type { SearchAllResponse, Song } from '@/types/music';
 import { TrackRow } from '@/components/TrackRow';
+import { SongBoxCard } from '@/components/SongBoxCard';
+import { ShelfCarousel } from '@/components/ShelfCarousel';
 import { UserAvatarButton } from '@/components/UserAvatarButton';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -533,413 +535,257 @@ function SearchContent() {
             </div>
           )}
 
-          {/* ALL: Recently Played Mix */}
-          {tab === 'all' && history.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Jump Back In
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                {history.slice(0, 6).map((song, idx) => (
-                  <button
-                    key={`jump-${song.id}-${idx}`}
-                    onClick={() => playTrack(song, history)}
-                    data-focusable="true"
-                    className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/5 text-left transition-all group"
-                  >
-                    <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
-                      {song.thumbnail && (
-                        <img src={song.thumbnail} alt={song.title} className="w-full h-full object-cover" />
-                      )}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <Play className="w-4 h-4 text-white fill-white" />
-                      </div>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
-                        {song.title}
-                      </p>
-                      <p className="text-xs text-zinc-400 truncate">
-                        {song.artists?.map((a) => a.name).join(', ')}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
           {/* TRACKS: Recently Played Tracks */}
           {tab === 'song' && recentTracks.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Recently Played Tracks
-                </h2>
-              </div>
-              <div className="space-y-1">
-                {recentTracks.slice(0, 6).map((song, idx) => (
-                  <TrackRow
-                    key={`rec-trk-${song.id}-${idx}`}
-                    track={song}
-                    index={idx}
-                    queue={recentTracks}
-                    showIndex
-                  />
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Recently Played Tracks"
+              icon={<Clock className="w-4 h-4 text-emerald-400" />}
+            >
+              {recentTracks.map((song, idx) => (
+                <SongBoxCard key={`rec-trk-${song.id}-${idx}`} song={song} queue={recentTracks} />
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* TRACKS & ALL: Top Ranking Tracks */}
           {(tab === 'all' || tab === 'song') && topTracks.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    Top Ranking Tracks
-                  </h2>
-                </div>
-                {tab === 'all' && (
-                  <button
-                    onClick={() => setTab('song')}
-                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
-                  >
-                    See all
-                  </button>
-                )}
-              </div>
-              <div className="space-y-1">
-                {(tab === 'all' ? topTracks.slice(0, 5) : topTracks).map((song, idx) => (
-                  <TrackRow
-                    key={`top-trk-${song.id}-${idx}`}
-                    track={song}
-                    index={idx}
-                    queue={topTracks}
-                    showIndex
-                  />
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Top Ranking Tracks"
+              icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
+            >
+              {topTracks.map((song, idx) => (
+                <SongBoxCard key={`top-trk-${song.id}-${idx}`} song={song} queue={topTracks} />
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* ARTISTS: Recently Played / Searched Artists */}
           {tab === 'artist' && recentArtists.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Your Recent Artists
-                </h2>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {recentArtists.map((artist, idx) => (
-                  <Link
-                    key={`rec-art-${artist.id}-${idx}`}
-                    href={getArtistOrPodcastHref(artist)}
-                    data-focusable="true"
-                    className="group p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
-                  >
-                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
-                      {artist.thumbnail ? (
-                        <img
-                          src={artist.thumbnail}
-                          alt={artist.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
-                          <User className="w-10 h-10" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
-                    <p className="text-xs text-zinc-400 mt-0.5">Recent Artist</p>
-                  </Link>
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Your Recent Artists"
+              icon={<Clock className="w-4 h-4 text-emerald-400" />}
+            >
+              {recentArtists.map((artist, idx) => (
+                <Link
+                  key={`rec-art-${artist.id}-${idx}`}
+                  href={getArtistOrPodcastHref(artist)}
+                  data-focusable="true"
+                  className="group w-36 sm:w-44 shrink-0 snap-start p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
+                >
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
+                    {artist.thumbnail ? (
+                      <img
+                        src={artist.thumbnail}
+                        alt={artist.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-zinc-500">
+                        <User className="w-10 h-10" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
+                  <p className="text-xs text-zinc-400 mt-0.5">Recent Artist</p>
+                </Link>
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* ARTISTS & ALL: Top Ranking Artists */}
           {(tab === 'all' || tab === 'artist') && topArtists.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    Top Ranking Artists
-                  </h2>
-                </div>
-                {tab === 'all' && (
-                  <button
-                    onClick={() => setTab('artist')}
-                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
-                  >
-                    See all
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {(tab === 'all' ? topArtists.slice(0, 5) : topArtists).map((artist: any, idx: number) => (
-                  <Link
-                    key={`top-art-${artist.id}-${idx}`}
-                    href={`/artist/${encodeURIComponent(artist.id)}`}
-                    data-focusable="true"
-                    className="group p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
-                  >
-                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
-                      {artist.thumbnail ? (
-                        <img
-                          src={artist.thumbnail}
-                          alt={artist.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
-                          <User className="w-10 h-10" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
-                    <p className="text-xs text-zinc-400 mt-0.5 truncate w-full">
-                      {artist.subscribers || 'Artist'}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Top Ranking Artists"
+              icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
+            >
+              {topArtists.map((artist: any, idx: number) => (
+                <Link
+                  key={`top-art-${artist.id}-${idx}`}
+                  href={`/artist/${encodeURIComponent(artist.id)}`}
+                  data-focusable="true"
+                  className="group w-36 sm:w-44 shrink-0 snap-start p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col items-center text-center"
+                >
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-zinc-800 mb-3 shadow-lg">
+                    {artist.thumbnail ? (
+                      <img
+                        src={artist.thumbnail}
+                        alt={artist.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-zinc-500">
+                        <User className="w-10 h-10" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white truncate w-full">{artist.name}</p>
+                  <p className="text-xs text-zinc-400 mt-0.5 truncate w-full">
+                    {artist.subscribers || 'Artist'}
+                  </p>
+                </Link>
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* ALBUMS: Recently Played Albums */}
           {tab === 'album' && recentAlbums.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Recently Played Albums
-                </h2>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {recentAlbums.map((album, idx) => (
-                  <Link
-                    key={`rec-alb-${album.id}-${idx}`}
-                    href={`/album/${encodeURIComponent(album.id)}`}
-                    data-focusable="true"
-                    className="group p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all"
-                  >
-                    <div className="aspect-square rounded-xl overflow-hidden bg-zinc-800 mb-3">
-                      {album.thumbnail && (
-                        <img
-                          src={album.thumbnail}
-                          alt={album.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                      )}
-                    </div>
-                    <p className="text-sm font-semibold text-white truncate">{album.title}</p>
-                    <p className="text-xs text-zinc-400 truncate mt-0.5">{album.artist}</p>
-                  </Link>
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Recently Played Albums"
+              icon={<Clock className="w-4 h-4 text-emerald-400" />}
+            >
+              {recentAlbums.map((album, idx) => (
+                <Link
+                  key={`rec-alb-${album.id}-${idx}`}
+                  href={`/album/${encodeURIComponent(album.id)}`}
+                  data-focusable="true"
+                  className="group w-36 sm:w-44 shrink-0 snap-start p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col"
+                >
+                  <div className="aspect-square w-full rounded-xl overflow-hidden bg-zinc-800 mb-2.5 shadow-md">
+                    {album.thumbnail && (
+                      <img
+                        src={album.thumbnail}
+                        alt={album.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white truncate">{album.title}</p>
+                  <p className="text-xs text-zinc-400 truncate mt-0.5">{album.artist}</p>
+                </Link>
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* ALBUMS & ALL: Top Ranking Albums */}
           {(tab === 'all' || tab === 'album') && topAlbums.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    Top Ranking Albums
-                  </h2>
-                </div>
-                {tab === 'all' && (
-                  <button
-                    onClick={() => setTab('album')}
-                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
-                  >
-                    See all
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {(tab === 'all' ? topAlbums.slice(0, 5) : topAlbums).map((album: any, idx: number) => (
-                  <Link
-                    key={`top-alb-${album.id}-${idx}`}
-                    href={`/album/${encodeURIComponent(album.id)}`}
-                    data-focusable="true"
-                    className="group p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all"
-                  >
-                    <div className="aspect-square rounded-xl overflow-hidden bg-zinc-800 mb-3">
-                      {album.thumbnail && (
-                        <img
-                          src={album.thumbnail}
-                          alt={album.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                      )}
-                    </div>
-                    <p className="text-sm font-semibold text-white truncate">{album.title}</p>
-                    <p className="text-xs text-zinc-400 truncate mt-0.5">
-                      {album.artists?.map((a: any) => a.name).join(', ') || album.year || 'Album'}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Top Ranking Albums"
+              icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
+            >
+              {topAlbums.map((album: any, idx: number) => (
+                <Link
+                  key={`top-alb-${album.id}-${idx}`}
+                  href={`/album/${encodeURIComponent(album.id)}`}
+                  data-focusable="true"
+                  className="group w-36 sm:w-44 shrink-0 snap-start p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col"
+                >
+                  <div className="aspect-square w-full rounded-xl overflow-hidden bg-zinc-800 mb-2.5 shadow-md">
+                    {album.thumbnail && (
+                      <img
+                        src={album.thumbnail}
+                        alt={album.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white truncate">{album.title}</p>
+                  <p className="text-xs text-zinc-400 truncate mt-0.5">
+                    {album.artists?.map((a: any) => a.name).join(', ') || album.year || 'Album'}
+                  </p>
+                </Link>
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* PODCASTS: Recently Played Podcasts */}
           {tab === 'podcast' && recentPodcasts.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Recently Played Podcasts
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {recentPodcasts.map((item, idx) => (
-                  <div
-                    key={`rec-pod-${item.id}-${idx}`}
-                    onClick={() => playTrack(item, recentPodcasts)}
-                    data-focusable="true"
-                    className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer group transition-all"
-                  >
-                    <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
-                      {item.thumbnail ? (
-                        <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
-                          <Radio className="w-6 h-6" />
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Play className="w-5 h-5 text-white fill-white" />
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 mb-0.5 inline-block">
-                        Recent Episode
-                      </span>
-                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
-                        {item.title}
-                      </p>
-                      <p className="text-xs text-zinc-400 truncate">
-                        {item.artists?.map((a) => a.name).join(', ') || 'Podcast'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+            <ShelfCarousel
+              title="Recently Played Podcasts"
+              icon={<Clock className="w-4 h-4 text-emerald-400" />}
+            >
+              {recentPodcasts.map((item, idx) => (
+                <SongBoxCard key={`rec-pod-${item.id}-${idx}`} song={item} queue={recentPodcasts} />
+              ))}
+            </ShelfCarousel>
           )}
 
           {/* PODCASTS & ALL: Top Ranking Podcasts */}
           {(tab === 'all' || tab === 'podcast') && topPodcasts.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Radio className="w-4 h-4 text-emerald-400" />
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    Top Ranking Podcasts
-                  </h2>
-                </div>
-                {tab === 'all' && (
-                  <button
-                    onClick={() => setTab('podcast')}
-                    className="text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
-                  >
-                    See all
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(tab === 'all' ? topPodcasts.slice(0, 6) : topPodcasts).map((item: any, idx: number) => {
-                  const isEpisode = item.type === 'episode' || typeof item.duration === 'number';
-                  if (isEpisode) {
-                    return (
-                      <div
-                        key={`top-pod-${item.id}-${idx}`}
-                        onClick={() =>
-                          playTrack(
-                            item,
-                            topPodcasts.filter((r) => r.type === 'episode' || typeof r.duration === 'number')
-                          )
-                        }
-                        data-focusable="true"
-                        className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer group transition-all"
-                      >
-                        <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
-                          {item.thumbnail ? (
-                            <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
-                              <Radio className="w-6 h-6" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Play className="w-5 h-5 text-white fill-white" />
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                              Episode
-                            </span>
-                            {item.durationText && (
-                              <span className="text-[11px] text-zinc-500">{item.durationText}</span>
-                            )}
-                          </div>
-                          <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
-                            {item.title}
-                          </p>
-                          <p className="text-xs text-zinc-400 truncate">
-                            {item.artists?.map((a: any) => a.name).join(', ') || item.author || 'Podcast'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  }
+            <ShelfCarousel
+              title="Top Ranking Podcasts"
+              icon={<Radio className="w-4 h-4 text-emerald-400" />}
+            >
+              {topPodcasts.map((item: any, idx: number) => {
+                const isEpisode = item.type === 'episode' || typeof item.duration === 'number';
+                if (isEpisode) {
                   return (
-                    <Link
-                      key={`top-pod-show-${item.id}-${idx}`}
-                      href={`/playlist/${encodeURIComponent(item.id)}`}
+                    <div
+                      key={`top-pod-${item.id}-${idx}`}
+                      onClick={() =>
+                        playTrack(
+                          item,
+                          topPodcasts.filter((r) => r.type === 'episode' || typeof r.duration === 'number')
+                        )
+                      }
                       data-focusable="true"
-                      className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 group transition-all"
+                      className="group w-36 sm:w-44 shrink-0 snap-start p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer transition-all flex flex-col"
                     >
-                      <div className="w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
+                      <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-zinc-800 mb-2.5 shadow-md">
                         {item.thumbnail ? (
                           <img
                             src={item.thumbnail}
                             alt={item.title}
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           />
                         ) : (
-                          <Radio className="w-6 h-6 text-indigo-400" />
+                          <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
+                            <Radio className="w-8 h-8" />
+                          </div>
                         )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 mb-0.5 inline-block">
-                          Podcast Show
+                        <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/80 text-white backdrop-blur-sm">
+                          Episode
                         </span>
-                        <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
-                          {item.title}
-                        </p>
-                        <p className="text-xs text-zinc-400 truncate">{item.author || 'Full Show'}</p>
                       </div>
-                    </Link>
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-zinc-400 truncate mt-0.5">
+                        {item.artists?.[0]?.name || item.author || 'Podcast'}
+                      </p>
+                    </div>
                   );
-                })}
-              </div>
-            </section>
+                }
+                return (
+                  <Link
+                    key={`top-pod-show-${item.id}-${idx}`}
+                    href={`/playlist/${encodeURIComponent(item.id)}`}
+                    data-focusable="true"
+                    className="group w-36 sm:w-44 shrink-0 snap-start p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 transition-all flex flex-col"
+                  >
+                    <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-zinc-800 mb-2.5 shadow-md flex items-center justify-center">
+                      {item.thumbnail ? (
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      ) : (
+                        <Radio className="w-8 h-8 text-indigo-400" />
+                      )}
+                      <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/80 text-white backdrop-blur-sm">
+                        Show
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">{item.author || 'Podcast Show'}</p>
+                  </Link>
+                );
+              })}
+            </ShelfCarousel>
           )}
         </div>
       )}

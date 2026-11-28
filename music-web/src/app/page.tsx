@@ -62,7 +62,7 @@ export default function HomePage() {
           avatarId: parsed.avatar_id || 'neon-beats',
         });
       }
-    } catch {}
+    } catch { }
 
     fetchSessionOnce()
       .then((data) => {
@@ -73,7 +73,7 @@ export default function HomePage() {
           setUserProfile({ name: metaName, avatarId: metaAvatar });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const userAvatar = getAvatarById(userProfile.avatarId);
@@ -214,7 +214,7 @@ export default function HomePage() {
       for (const song of candidates) {
         if (!song?.id || seen.has(song.id)) continue;
         seen.add(song.id);
-        fetch(`${getStreamUrl(song.id)}/info`).catch(() => {});
+        fetch(`${getStreamUrl(song.id)}/info`).catch(() => { });
         if (seen.size >= 2) break;
       }
     }, 800);
@@ -412,8 +412,8 @@ export default function HomePage() {
                     card.type === 'album'
                       ? `/album/${encodeURIComponent(card.id)}`
                       : card.type === 'artist'
-                      ? getArtistOrPodcastHref(card)
-                      : `/playlist/${encodeURIComponent(card.id)}`;
+                        ? getArtistOrPodcastHref(card)
+                        : `/playlist/${encodeURIComponent(card.id)}`;
 
                   return (
                     <Link

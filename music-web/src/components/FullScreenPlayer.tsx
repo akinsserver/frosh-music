@@ -27,7 +27,7 @@ import {
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { fetchLyrics } from '@/lib/api';
-import { getArtistOrPodcastHref } from '@/lib/recommendations';
+import { getArtistOrPodcastHref, getCleanDisplayArtists } from '@/lib/recommendations';
 import type { LyricsResponse } from '@/types/music';
 
 function formatTime(sec: number): string {
@@ -482,7 +482,7 @@ export function FullScreenPlayer() {
                 {currentTrack.title}
               </h2>
               <p className="text-xs sm:text-sm text-zinc-400 truncate mt-0.5">
-                {currentTrack.artists.map((a, i) => (
+                {getCleanDisplayArtists(currentTrack.artists, isPodcast).map((a, i) => (
                   <span key={`${a.name}-${i}`}>
                     {i > 0 && ', '}
                     <Link
