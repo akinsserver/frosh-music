@@ -35,6 +35,43 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
   return result.sort((a, b) => a.time - b.time);
 }
 
+/**
+ * Parse YouTube timedtext XML into structured timed lines
+ * Example: <text start="2" dur="4.2">Some speech or caption</text>
+ */
+export function parseTimedTextXml(xml: string): SyncedLyricLine[] {
+  const regex = /<text start="([0-9.]+)"[^>]*>(.*?)<\/text>/gi;
+  const result: SyncedLyricLine[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = regex.exec(xml)) !== null) {
+    const startSec = parseFloat(m[1]);
+    const ms = Math.round(startSec * 1000);
+    const rawText = m[2]
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/^>>\s*/, '')
+      .replace(/\n/g, ' ')
+      .trim();
+
+    if (rawText) {
+      const minutes = Math.floor(startSec / 60);
+      const seconds = Math.floor(startSec % 60);
+      const centisecs = Math.floor((startSec % 1) * 100);
+      result.push({
+        time: ms,
+        timestamp: `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(centisecs).padStart(2, '0')}`,
+        text: rawText
+      });
+    }
+  }
+
+  return result.sort((a, b) => a.time - b.time);
+}
+
 export async function fetchLyrics(
   videoId: string,
   trackTitle?: string,
@@ -158,6 +195,42 @@ export async function fetchLyrics(
     }
   } catch (e: any) {
     // InnerTube lyrics may not be present for all tracks
+  }
+
+  // 4. Fallback: YouTube closed captions / transcripts (especially for podcasts, interviews, video shows)
+  try {
+    const yt = await getInnertube();
+    const info = await yt.getInfo(videoId);
+    const captionTracks = info.captions?.caption_tracks || [];
+    if (captionTracks.length > 0) {
+      const track =
+        captionTracks.find((t: any) => t.language_code === 'en' || t.language_code?.startsWith('en')) ||
+        captionTracks[0];
+
+      if (track?.base_url) {
+        const res = await fetch(track.base_url);
+        if (res.ok) {
+          const xml = await res.text();
+          const synced = parseTimedTextXml(xml);
+          if (synced.length > 0) {
+            const plain = synced.map((s) => s.text).join('\n');
+            const response: LyricsResponse = {
+              videoId,
+              trackName: title,
+              artistName: artist,
+              source: 'captions',
+              isSynced: true,
+              syncedLyrics: synced,
+              plainLyrics: plain
+            };
+            lyricsCache.set(videoId, response);
+            return response;
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    // Captions may not be present for all videos
   }
 
   const notFound: LyricsResponse = {

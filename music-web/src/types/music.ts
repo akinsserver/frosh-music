@@ -110,7 +110,7 @@ export interface LyricsResponse {
   videoId: string;
   trackName?: string;
   artistName?: string;
-  source: 'lrclib' | 'innertube' | 'none';
+  source: 'lrclib' | 'innertube' | 'captions' | 'none';
   isSynced: boolean;
   plainLyrics?: string;
   syncedLyrics?: SyncedLyricLine[];

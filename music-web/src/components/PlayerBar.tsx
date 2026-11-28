@@ -18,6 +18,7 @@ import {
   Heart,
   Loader2,
   Cast,
+  Subtitles,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -76,6 +77,11 @@ export function PlayerBar() {
 
   const liked = isLiked(currentTrack.id);
   const progressPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const isPodcast = Boolean(
+    currentTrack.artists.some((a) => a.id?.startsWith('MPSP')) ||
+    (currentTrack.duration && currentTrack.duration > 1200) ||
+    /\b(podcast|episode|ep\.\s*\d+)\b/i.test(currentTrack.title || '')
+  );
 
   return (
     <footer className="fixed bottom-14 md:static left-0 right-0 z-30 h-16 md:h-22 px-3 md:px-6 bg-zinc-950/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-between gap-4 shrink-0">
@@ -231,12 +237,12 @@ export function PlayerBar() {
             setIsFullScreen(true);
           }}
           data-focusable="true"
-          title="Synced Lyrics (L)"
+          title={isPodcast ? "Captions (L)" : "Synced Lyrics (L)"}
           className={`p-2 rounded-lg transition-colors ${
             showLyrics ? 'text-emerald-400 bg-emerald-500/10' : 'text-zinc-400 hover:text-white'
           }`}
         >
-          <Mic2 className="w-4 h-4" />
+          {isPodcast ? <Subtitles className="w-4 h-4" /> : <Mic2 className="w-4 h-4" />}
         </button>
 
         <button

@@ -22,6 +22,7 @@ import {
   Check,
   Cast,
   GripVertical,
+  Subtitles,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -93,6 +94,25 @@ export function FullScreenPlayer() {
   const activeLineRef = useRef<HTMLButtonElement | null>(null);
   const scrollPanelRef = useRef<HTMLDivElement | null>(null);
   const langMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const isPodcast = Boolean(
+    currentTrack?.artists?.some((a) => a.id?.startsWith('MPSP')) ||
+    (currentTrack?.duration && currentTrack.duration > 1200) ||
+    /\b(podcast|episode|ep\.\s*\d+)\b/i.test(currentTrack?.title || '')
+  );
+
+  const hasLyricsOrCaptions = Boolean(
+    lyrics &&
+    lyrics.source !== 'none' &&
+    (lyrics.plainLyrics || (lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0))
+  );
+
+  // If playing a podcast and no captions are available once loading finishes, dismiss the lyrics tab
+  useEffect(() => {
+    if (isPodcast && !lyricsLoading && !hasLyricsOrCaptions && activeTab === 'lyrics') {
+      setActiveTab('queue');
+    }
+  }, [isPodcast, lyricsLoading, hasLyricsOrCaptions, activeTab]);
 
   // Close language menu on click outside
   useEffect(() => {
@@ -343,18 +363,20 @@ export function FullScreenPlayer() {
           </button>
 
           <div className="flex items-center gap-1.5 bg-white/10 p-1 rounded-full">
-            <button
-              onClick={() => setActiveTab('lyrics')}
-              data-focusable="true"
-              className={`flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                activeTab === 'lyrics'
-                  ? 'bg-white text-zinc-950'
-                  : 'text-zinc-300 hover:text-white'
-              }`}
-            >
-              <Mic2 className="w-3.5 h-3.5" />
-              Lyrics
-            </button>
+            {(!isPodcast || hasLyricsOrCaptions || lyricsLoading) && (
+              <button
+                onClick={() => setActiveTab('lyrics')}
+                data-focusable="true"
+                className={`flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                  activeTab === 'lyrics'
+                    ? 'bg-white text-zinc-950'
+                    : 'text-zinc-300 hover:text-white'
+                }`}
+              >
+                {isPodcast ? <Subtitles className="w-3.5 h-3.5" /> : <Mic2 className="w-3.5 h-3.5" />}
+                {isPodcast ? 'Captions' : 'Lyrics'}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('queue')}
               data-focusable="true"
@@ -510,8 +532,8 @@ export function FullScreenPlayer() {
             </button>
           </div>
 
-          {/* Spotify-Style Collapsed Lyrics Preview Card (Mobile Only) */}
-          {activeTab === 'lyrics' && !isLyricsExpanded && (
+          {/* Spotify-Style Collapsed Lyrics/Captions Preview Card (Mobile Only) */}
+          {activeTab === 'lyrics' && !isLyricsExpanded && (!isPodcast || hasLyricsOrCaptions) && (
             <div
               onClick={() => setIsLyricsExpanded(true)}
               data-focusable="true"
@@ -519,8 +541,12 @@ export function FullScreenPlayer() {
             >
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
-                  <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Lyrics</span>
+                  {isPodcast ? (
+                    <Subtitles className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>{isPodcast ? 'Captions' : 'Lyrics'}</span>
                 </div>
                 <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                   {/* Translate dropdown button */}
@@ -528,7 +554,7 @@ export function FullScreenPlayer() {
                     <button
                       onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
                       data-focusable="true"
-                      title="Translate lyrics"
+                      title={isPodcast ? "Translate captions" : "Translate lyrics"}
                       className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${
                         selectedLanguage !== 'off'
                           ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -552,7 +578,7 @@ export function FullScreenPlayer() {
                         className="absolute right-0 bottom-full mb-2 w-52 max-h-60 overflow-y-auto rounded-xl bg-zinc-900 border border-white/20 shadow-2xl py-1 z-50 backdrop-blur-xl"
                       >
                         <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-white/10">
-                          Translate lyrics to
+                          Translate {isPodcast ? 'captions' : 'lyrics'} to
                         </div>
                         {TRANSLATION_LANGUAGES.map((lang) => {
                           const isSelected = selectedLanguage === lang.code;
@@ -683,11 +709,15 @@ export function FullScreenPlayer() {
         >
           {activeTab === 'lyrics' ? (
             <>
-              {/* Sticky Lyrics Toolbar */}
+              {/* Sticky Lyrics/Captions Toolbar */}
               <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 -mt-4 px-4 sm:px-6 py-2.5 bg-zinc-950/90 backdrop-blur-md border-b border-white/10 flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                  <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Lyrics</span>
+                  {isPodcast ? (
+                    <Subtitles className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>{isPodcast ? 'Captions' : 'Lyrics'}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {/* Translate dropdown */}
@@ -695,7 +725,7 @@ export function FullScreenPlayer() {
                     <button
                       onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
                       data-focusable="true"
-                      title="Translate lyrics"
+                      title={isPodcast ? "Translate captions" : "Translate lyrics"}
                       className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                         selectedLanguage !== 'off'
                           ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -719,7 +749,7 @@ export function FullScreenPlayer() {
                         className="absolute right-0 top-full mt-2 w-52 max-h-60 overflow-y-auto rounded-xl bg-zinc-900 border border-white/20 shadow-2xl py-1 z-50 backdrop-blur-xl"
                       >
                         <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-white/10">
-                          Translate lyrics to
+                          Translate {isPodcast ? 'captions' : 'lyrics'} to
                         </div>
                         {TRANSLATION_LANGUAGES.map((lang) => {
                           const isSelected = selectedLanguage === lang.code;
@@ -772,7 +802,9 @@ export function FullScreenPlayer() {
               {lyricsLoading ? (
                 <div className="h-full flex items-center justify-center text-zinc-400 gap-2 py-8">
                   <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
-                  <span className="text-sm">Loading synced lyrics...</span>
+                  <span className="text-sm">
+                    {isPodcast ? 'Loading synced captions...' : 'Loading synced lyrics...'}
+                  </span>
                 </div>
               ) : lyrics?.isSynced && lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0 ? (
                 <div className="space-y-4 py-4 sm:py-6">
@@ -827,9 +859,17 @@ export function FullScreenPlayer() {
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-center p-6">
-                  <Mic2 className="w-8 h-8 sm:w-10 sm:h-10 mb-2.5 opacity-40" />
-                  <p className="text-sm sm:text-base font-medium text-zinc-300">No lyrics available</p>
-                  <p className="text-xs mt-1">Instrumental or lyrics not yet indexed.</p>
+                  {isPodcast ? (
+                    <Subtitles className="w-8 h-8 sm:w-10 sm:h-10 mb-2.5 opacity-40 text-emerald-400" />
+                  ) : (
+                    <Mic2 className="w-8 h-8 sm:w-10 sm:h-10 mb-2.5 opacity-40" />
+                  )}
+                  <p className="text-sm sm:text-base font-medium text-zinc-300">
+                    {isPodcast ? 'No captions available' : 'No lyrics available'}
+                  </p>
+                  <p className="text-xs mt-1">
+                    {isPodcast ? 'Closed captions could not be found for this episode.' : 'Instrumental or lyrics not yet indexed.'}
+                  </p>
                 </div>
               )}
             </>
