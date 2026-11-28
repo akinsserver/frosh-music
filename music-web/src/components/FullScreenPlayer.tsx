@@ -16,6 +16,10 @@ import {
   Heart,
   Trash2,
   Loader2,
+  Maximize2,
+  Minimize2,
+  Languages,
+  Check,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -28,6 +32,20 @@ function formatTime(sec: number): string {
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 }
+
+const TRANSLATION_LANGUAGES = [
+  { code: 'off', label: 'Off' },
+  { code: 'fr', label: 'French (Français)' },
+  { code: 'es', label: 'Spanish (Español)' },
+  { code: 'de', label: 'German (Deutsch)' },
+  { code: 'id', label: 'Indonesian (Bahasa)' },
+  { code: 'pt', label: 'Portuguese (Português)' },
+  { code: 'it', label: 'Italian (Italiano)' },
+  { code: 'ja', label: 'Japanese (日本語)' },
+  { code: 'ko', label: 'Korean (한국어)' },
+  { code: 'zh-CN', label: 'Chinese (中文)' },
+  { code: 'yo', label: 'Yoruba (Èdè Yorùbá)' },
+] as const;
 
 export function FullScreenPlayer() {
   const {
@@ -56,8 +74,27 @@ export function FullScreenPlayer() {
   const [activeTab, setActiveTab] = useState<'lyrics' | 'queue'>('lyrics');
   const [lyrics, setLyrics] = useState<LyricsResponse | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('off');
+  const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translatedLines, setTranslatedLines] = useState<string[] | null>(null);
+
   const activeLineRef = useRef<HTMLButtonElement | null>(null);
   const scrollPanelRef = useRef<HTMLDivElement | null>(null);
+  const langMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close language menu on click outside
+  useEffect(() => {
+    if (!isLangMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+        setIsLangMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isLangMenuOpen]);
 
   // Touch swipe-down-to-minimize state
   const [dragOffsetY, setDragOffsetY] = useState(0);
@@ -113,6 +150,64 @@ export function FullScreenPlayer() {
       cancelled = true;
     };
   }, [currentTrack]);
+
+  // Reset expanded state and line cache on track change
+  useEffect(() => {
+    setTranslatedLines(null);
+    setIsLyricsExpanded(false);
+    setIsLangMenuOpen(false);
+  }, [currentTrack?.id]);
+
+  // Fetch translation when selected language or lyrics change
+  useEffect(() => {
+    if (selectedLanguage === 'off') {
+      setTranslatedLines(null);
+      setTranslating(false);
+      return;
+    }
+
+    if (!lyrics) return;
+
+    let linesToTranslate: string[] = [];
+    if (lyrics.isSynced && lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0) {
+      linesToTranslate = lyrics.syncedLyrics.map((l) => l.text || '');
+    } else if (lyrics.plainLyrics) {
+      linesToTranslate = lyrics.plainLyrics.split('\n');
+    }
+
+    if (linesToTranslate.length === 0) return;
+
+    let cancelled = false;
+    setTranslating(true);
+
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines: linesToTranslate,
+        targetLang: selectedLanguage,
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Translation failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled && data.translated) {
+          setTranslatedLines(data.translated);
+        }
+      })
+      .catch((err) => {
+        console.warn('Lyrics translation error:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setTranslating(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLanguage, lyrics]);
 
   // Compute current active lyric index
   const currentTimeMs = currentTime * 1000;
@@ -269,10 +364,14 @@ export function FullScreenPlayer() {
       </header>
 
       {/* Main Responsive Flex/Split Content */}
-      <div className="relative z-10 flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-2 gap-4 lg:gap-8 px-5 sm:px-8 md:px-14 pb-[max(1rem,env(safe-area-inset-bottom))] lg:items-center">
-        {/* Left / Top: Artwork & Controls */}
-        <div className="shrink-0 flex flex-col items-center justify-center max-w-md mx-auto w-full pt-1">
-          <div className="w-40 h-40 sm:w-64 sm:h-64 md:w-72 md:h-72 lg:w-96 lg:h-96 rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-zinc-900 mb-3 sm:mb-5">
+      <div className="relative z-10 flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-2 gap-3 lg:gap-8 px-4 sm:px-8 md:px-14 pb-[max(1rem,env(safe-area-inset-bottom))] lg:items-center">
+        {/* Left / Top: Artwork & Controls (Hidden on mobile when lyrics expanded) */}
+        <div
+          className={`shrink-0 flex flex-col items-center justify-center max-w-md mx-auto w-full pt-1 ${
+            activeTab === 'lyrics' && isLyricsExpanded ? 'hidden lg:flex' : 'flex'
+          }`}
+        >
+          <div className="w-36 h-36 sm:w-60 sm:h-60 md:w-72 md:h-72 lg:w-96 lg:h-96 rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-zinc-900 mb-2.5 sm:mb-4">
             {currentTrack.thumbnail && (
               <img
                 src={currentTrack.thumbnail}
@@ -282,9 +381,9 @@ export function FullScreenPlayer() {
             )}
           </div>
 
-          <div className="w-full flex items-center justify-between gap-3 mb-2.5 sm:mb-4">
+          <div className="w-full flex items-center justify-between gap-3 mb-2 sm:mb-3">
             <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-white truncate">
+              <h2 className="text-base sm:text-xl md:text-2xl font-bold text-white truncate">
                 {currentTrack.title}
               </h2>
               <p className="text-xs sm:text-sm text-zinc-400 truncate mt-0.5">
@@ -313,12 +412,12 @@ export function FullScreenPlayer() {
                 liked ? 'text-emerald-400' : 'text-zinc-400 hover:text-white'
               }`}
             >
-              <Heart className={`w-6 h-6 ${liked ? 'fill-emerald-400' : ''}`} />
+              <Heart className={`w-5 h-5 sm:w-6 sm:h-6 ${liked ? 'fill-emerald-400' : ''}`} />
             </button>
           </div>
 
           {/* Scrubber */}
-          <div className="w-full mb-3 sm:mb-5">
+          <div className="w-full mb-2 sm:mb-4">
             <div className="relative h-2 bg-white/15 rounded-full cursor-pointer">
               <div
                 className="absolute inset-y-0 left-0 bg-emerald-400 rounded-full"
@@ -363,7 +462,7 @@ export function FullScreenPlayer() {
             <button
               onClick={togglePlay}
               data-focusable="true"
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white text-zinc-950 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform shadow-xl"
+              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-white text-zinc-950 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform shadow-xl"
             >
               {isLoading ? (
                 <Loader2 className="w-6 h-6 sm:w-7 sm:h-7 animate-spin" />
@@ -396,52 +495,330 @@ export function FullScreenPlayer() {
               )}
             </button>
           </div>
-        </div>
 
-        {/* Right / Bottom: Flex-1 Scrollable Synced Lyrics or Queue */}
-        <div
-          ref={scrollPanelRef}
-          className="flex-1 min-h-[140px] lg:h-full lg:max-h-[75vh] overflow-y-auto px-4 sm:px-6 py-4 rounded-2xl bg-white/[0.03] border border-white/10"
-        >
-          {activeTab === 'lyrics' ? (
-            lyricsLoading ? (
-              <div className="h-full flex items-center justify-center text-zinc-400 gap-2 py-8">
-                <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
-                <span className="text-sm">Loading synced lyrics...</span>
-              </div>
-            ) : lyrics?.isSynced && lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0 ? (
-              <div className="space-y-3.5 py-4 sm:py-8">
-                {lyrics.syncedLyrics.map((line, i) => {
-                  const isCurrent = i === activeLyricIdx;
-                  return (
+          {/* Spotify-Style Collapsed Lyrics Preview Card (Mobile Only) */}
+          {activeTab === 'lyrics' && !isLyricsExpanded && (
+            <div
+              onClick={() => setIsLyricsExpanded(true)}
+              data-focusable="true"
+              className="w-full max-w-md mx-auto mt-2.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.09] active:bg-white/[0.12] border border-white/10 p-3 sm:p-3.5 cursor-pointer transition-all flex flex-col justify-between shrink-0 shadow-lg relative lg:hidden"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                  <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Lyrics</span>
+                </div>
+                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  {/* Translate dropdown button */}
+                  <div className="relative">
                     <button
-                      key={`${line.time}-${i}`}
-                      ref={isCurrent ? activeLineRef : null}
-                      onClick={() => seek(line.time / 1000)}
-                      className={`block w-full text-left text-base sm:text-xl md:text-2xl font-bold transition-all duration-300 cursor-pointer ${
-                        isCurrent
-                          ? 'text-white scale-[1.02] origin-left'
-                          : i < activeLyricIdx
-                          ? 'text-zinc-500 hover:text-zinc-300'
-                          : 'text-zinc-400/70 hover:text-zinc-200'
+                      onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
+                      data-focusable="true"
+                      title="Translate lyrics"
+                      className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${
+                        selectedLanguage !== 'off'
+                          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                          : 'bg-white/10 border-white/10 hover:bg-white/20 text-zinc-300'
                       }`}
                     >
-                      {line.text || '♪'}
+                      {translating ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                      ) : (
+                        <Languages className="w-3 h-3" />
+                      )}
+                      <span>
+                        {selectedLanguage === 'off'
+                          ? 'Translate'
+                          : TRANSLATION_LANGUAGES.find((l) => l.code === selectedLanguage)?.code.toUpperCase()}
+                      </span>
                     </button>
-                  );
-                })}
+                    {isLangMenuOpen && (
+                      <div
+                        ref={langMenuRef}
+                        className="absolute right-0 bottom-full mb-2 w-52 max-h-60 overflow-y-auto rounded-xl bg-zinc-900 border border-white/20 shadow-2xl py-1 z-50 backdrop-blur-xl"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-white/10">
+                          Translate lyrics to
+                        </div>
+                        {TRANSLATION_LANGUAGES.map((lang) => {
+                          const isSelected = selectedLanguage === lang.code;
+                          return (
+                            <button
+                              key={lang.code}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLanguage(lang.code);
+                                setIsLangMenuOpen(false);
+                              }}
+                              data-focusable="true"
+                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors ${
+                                isSelected
+                                  ? 'bg-emerald-500/15 text-emerald-300 font-semibold'
+                                  : 'text-zinc-300 hover:bg-white/10'
+                              }`}
+                            >
+                              <span>{lang.label}</span>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {/* Expand button */}
+                  <button
+                    onClick={() => setIsLyricsExpanded(true)}
+                    data-focusable="true"
+                    title="Expand lyrics"
+                    className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-            ) : lyrics?.plainLyrics ? (
-              <pre className="whitespace-pre-wrap font-sans text-sm sm:text-lg text-zinc-300 leading-relaxed py-3">
-                {lyrics.plainLyrics}
-              </pre>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-center p-6">
-                <Mic2 className="w-8 h-8 sm:w-10 sm:h-10 mb-2.5 opacity-40" />
-                <p className="text-sm sm:text-base font-medium text-zinc-300">No lyrics available</p>
-                <p className="text-xs mt-1">Instrumental or lyrics not yet indexed.</p>
+
+              {/* Lyrics Preview Line */}
+              <div className="min-h-[42px] flex flex-col justify-center">
+                {lyricsLoading ? (
+                  <div className="flex items-center gap-2 text-zinc-400 text-xs py-1">
+                    <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                    <span>Loading lyrics...</span>
+                  </div>
+                ) : activeLyricIdx >= 0 && lyrics?.syncedLyrics?.[activeLyricIdx] ? (
+                  <div>
+                    <p className="text-xs sm:text-sm font-bold text-white line-clamp-1">
+                      {lyrics.syncedLyrics[activeLyricIdx].text || '♪'}
+                    </p>
+                    {selectedLanguage !== 'off' && translatedLines && translatedLines[activeLyricIdx] && (
+                      <p className="text-[11px] sm:text-xs font-medium text-emerald-400 italic line-clamp-1 mt-0.5">
+                        {translatedLines[activeLyricIdx]}
+                      </p>
+                    )}
+                    {lyrics.syncedLyrics[activeLyricIdx + 1] && (
+                      <p className="text-[11px] text-zinc-400/70 line-clamp-1 mt-0.5">
+                        {lyrics.syncedLyrics[activeLyricIdx + 1].text}
+                      </p>
+                    )}
+                  </div>
+                ) : lyrics?.plainLyrics ? (
+                  <div>
+                    <p className="text-xs text-zinc-300 line-clamp-2">
+                      {lyrics.plainLyrics.split('\n').filter(Boolean).slice(0, 2).join(' ')}
+                    </p>
+                    {selectedLanguage !== 'off' && translatedLines && translatedLines[0] && (
+                      <p className="text-[11px] text-emerald-400 italic line-clamp-1 mt-0.5">
+                        {translatedLines[0]}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400">No lyrics available</p>
+                )}
               </div>
-            )
+            </div>
+          )}
+        </div>
+
+        {/* Mobile Sticky Now-Playing Pill when Lyrics Expanded */}
+        {activeTab === 'lyrics' && isLyricsExpanded && (
+          <div className="shrink-0 max-w-md w-full mx-auto mb-2 flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-2xl p-2.5 lg:hidden">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <img
+                src={currentTrack.thumbnail}
+                alt={currentTrack.title}
+                className="w-10 h-10 rounded-lg object-cover bg-zinc-800 shrink-0"
+              />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white truncate">{currentTrack.title}</p>
+                <p className="text-[11px] text-zinc-400 truncate">
+                  {currentTrack.artists.map((a) => a.name).join(', ')}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => toggleLike(currentTrack)}
+                data-focusable="true"
+                className={`p-1.5 rounded-full transition-colors ${
+                  liked ? 'text-emerald-400' : 'text-zinc-400'
+                }`}
+              >
+                <Heart className={`w-4 h-4 ${liked ? 'fill-emerald-400' : ''}`} />
+              </button>
+              <button
+                onClick={togglePlay}
+                data-focusable="true"
+                className="p-2 rounded-full bg-white text-zinc-950 hover:scale-105 active:scale-95 shadow"
+              >
+                {isPlaying ? (
+                  <Pause className="w-4 h-4 fill-current" />
+                ) : (
+                  <Play className="w-4 h-4 fill-current ml-0.5" />
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Right / Bottom: Full Scrollable Synced Lyrics or Queue */}
+        <div
+          ref={scrollPanelRef}
+          className={`flex-1 min-h-[140px] lg:h-full lg:max-h-[75vh] overflow-y-auto px-4 sm:px-6 py-4 rounded-2xl bg-white/[0.03] border border-white/10 flex flex-col ${
+            activeTab === 'lyrics' && !isLyricsExpanded ? 'hidden lg:flex' : 'flex'
+          }`}
+        >
+          {activeTab === 'lyrics' ? (
+            <>
+              {/* Sticky Lyrics Toolbar */}
+              <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 -mt-4 px-4 sm:px-6 py-2.5 bg-zinc-950/90 backdrop-blur-md border-b border-white/10 flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                  <Mic2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Lyrics</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Translate dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
+                      data-focusable="true"
+                      title="Translate lyrics"
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        selectedLanguage !== 'off'
+                          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                          : 'bg-white/10 border-white/10 hover:bg-white/20 text-zinc-300'
+                      }`}
+                    >
+                      {translating ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                      ) : (
+                        <Languages className="w-3 h-3" />
+                      )}
+                      <span>
+                        {selectedLanguage === 'off'
+                          ? 'Translate'
+                          : TRANSLATION_LANGUAGES.find((l) => l.code === selectedLanguage)?.code.toUpperCase()}
+                      </span>
+                    </button>
+                    {isLangMenuOpen && (
+                      <div
+                        ref={langMenuRef}
+                        className="absolute right-0 top-full mt-2 w-52 max-h-60 overflow-y-auto rounded-xl bg-zinc-900 border border-white/20 shadow-2xl py-1 z-50 backdrop-blur-xl"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 border-b border-white/10">
+                          Translate lyrics to
+                        </div>
+                        {TRANSLATION_LANGUAGES.map((lang) => {
+                          const isSelected = selectedLanguage === lang.code;
+                          return (
+                            <button
+                              key={lang.code}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLanguage(lang.code);
+                                setIsLangMenuOpen(false);
+                              }}
+                              data-focusable="true"
+                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors ${
+                                isSelected
+                                  ? 'bg-emerald-500/15 text-emerald-300 font-semibold'
+                                  : 'text-zinc-300 hover:bg-white/10'
+                              }`}
+                            >
+                              <span>{lang.label}</span>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Collapse / Expand Toggle */}
+                  <button
+                    onClick={() => setIsLyricsExpanded(!isLyricsExpanded)}
+                    data-focusable="true"
+                    title={isLyricsExpanded ? 'Collapse lyrics' : 'Expand lyrics'}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-medium text-white transition-colors"
+                  >
+                    {isLyricsExpanded ? (
+                      <>
+                        <Minimize2 className="w-3.5 h-3.5" />
+                        <span>Collapse</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        <span>Expand</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {lyricsLoading ? (
+                <div className="h-full flex items-center justify-center text-zinc-400 gap-2 py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+                  <span className="text-sm">Loading synced lyrics...</span>
+                </div>
+              ) : lyrics?.isSynced && lyrics.syncedLyrics && lyrics.syncedLyrics.length > 0 ? (
+                <div className="space-y-4 py-4 sm:py-6">
+                  {lyrics.syncedLyrics.map((line, i) => {
+                    const isCurrent = i === activeLyricIdx;
+                    return (
+                      <button
+                        key={`${line.time}-${i}`}
+                        ref={isCurrent ? activeLineRef : null}
+                        onClick={() => seek(line.time / 1000)}
+                        data-focusable="true"
+                        className={`block w-full text-left py-1.5 px-2 rounded-xl transition-all duration-300 cursor-pointer ${
+                          isCurrent
+                            ? 'text-white scale-[1.01] origin-left bg-white/[0.04]'
+                            : i < activeLyricIdx
+                            ? 'text-zinc-500 hover:text-zinc-300'
+                            : 'text-zinc-400/70 hover:text-zinc-200'
+                        }`}
+                      >
+                        <span className="block text-base sm:text-xl md:text-2xl font-bold leading-snug">
+                          {line.text || '♪'}
+                        </span>
+                        {selectedLanguage !== 'off' && translatedLines && translatedLines[i] && (
+                          <span
+                            className={`block text-xs sm:text-sm tracking-wide mt-1 transition-colors ${
+                              isCurrent
+                                ? 'text-emerald-400 font-semibold'
+                                : 'text-emerald-400/60 italic'
+                            }`}
+                          >
+                            {translatedLines[i]}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : lyrics?.plainLyrics ? (
+                <div className="py-4 space-y-3">
+                  {lyrics.plainLyrics.split('\n').map((plainLine, i) => (
+                    <div key={i} className="leading-relaxed">
+                      <p className="text-sm sm:text-base text-zinc-200 font-medium">
+                        {plainLine || '\u00A0'}
+                      </p>
+                      {selectedLanguage !== 'off' && translatedLines && translatedLines[i] && (
+                        <p className="text-xs sm:text-sm text-emerald-400/80 italic mt-0.5">
+                          {translatedLines[i]}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-center p-6">
+                  <Mic2 className="w-8 h-8 sm:w-10 sm:h-10 mb-2.5 opacity-40" />
+                  <p className="text-sm sm:text-base font-medium text-zinc-300">No lyrics available</p>
+                  <p className="text-xs mt-1">Instrumental or lyrics not yet indexed.</p>
+                </div>
+              )}
+            </>
           ) : (
             <div className="space-y-2">
               {queue.map((item, idx) => {
