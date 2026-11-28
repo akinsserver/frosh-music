@@ -20,6 +20,17 @@ interface CachedFormat {
 
 // Cache TTL: 90 minutes (CDN URLs last ~6 hours)
 const streamCache = new Map<string, CachedFormat>();
+const inFlightResolves = new Map<string, Promise<StreamFormatInfo>>();
+
+// Small head-chunk RAM cache (512 KB per track, max 15 tracks = ~7.5 MB)
+// Makes iOS Safari's sequential Range probes (bytes=0-1, bytes=0-65535) instant (0ms).
+const HEAD_CACHE_BYTES = 512 * 1024;
+const MAX_HEAD_CACHE_ENTRIES = 15;
+const headChunkCache = new Map<
+  string,
+  { buf: Buffer; totalLength?: number; contentType: string; expiresAt: number }
+>();
+
 const CACHE_TTL_MS = 90 * 60 * 1000;
 const CHUNK_SIZE = 1024 * 1024; // 1 MB bounded chunks (prevents Google Video CDN 403 on open-ended ranges)
 
@@ -202,7 +213,13 @@ async function extractWithInnerTube(videoId: string): Promise<StreamFormatInfo> 
     throw new Error(`No audio formats found for ${videoId}`);
   }
 
-  audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  // Prefer audio/mp4 (AAC) for universal iOS Safari / AVPlayer compatibility, then highest bitrate
+  audioFormats.sort((a, b) => {
+    const aMp4 = (a.mime_type || '').includes('mp4') ? 1 : 0;
+    const bMp4 = (b.mime_type || '').includes('mp4') ? 1 : 0;
+    if (aMp4 !== bMp4) return bMp4 - aMp4;
+    return (b.bitrate || 0) - (a.bitrate || 0);
+  });
 
   let selectedFormat = audioFormats.find((f) => !!f.url);
   let directUrl: string | undefined = selectedFormat?.url;
@@ -231,41 +248,79 @@ async function extractWithInnerTube(videoId: string): Promise<StreamFormatInfo> 
   };
 }
 
-export async function resolveStreamFormat(videoId: string): Promise<StreamFormatInfo> {
-  const cached = streamCache.get(videoId);
-  if (cached && Date.now() < cached.expiresAt) {
-    return {
-      itag: 140,
-      mimeType: cached.mimeType,
-      bitrate: cached.bitrate,
-      contentLength: cached.contentLength,
-      url: cached.url,
-      extractor: cached.extractor,
-    };
+export async function resolveStreamFormat(
+  videoId: string,
+  forceYtDlp = false
+): Promise<StreamFormatInfo> {
+  if (!forceYtDlp) {
+    const cached = streamCache.get(videoId);
+    if (cached && Date.now() < cached.expiresAt) {
+      return {
+        itag: 140,
+        mimeType: cached.mimeType,
+        bitrate: cached.bitrate,
+        contentLength: cached.contentLength,
+        url: cached.url,
+        extractor: cached.extractor,
+      };
+    }
+
+    const existing = inFlightResolves.get(videoId);
+    if (existing) {
+      return existing;
+    }
   }
 
-  let result: StreamFormatInfo;
+  const resolvePromise = (async (): Promise<StreamFormatInfo> => {
+    let result: StreamFormatInfo;
+
+    if (!forceYtDlp) {
+      try {
+        result = await extractWithInnerTube(videoId);
+        console.log(
+          `[Streamer] InnerTube resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`
+        );
+      } catch (innerErr: any) {
+        console.warn(
+          `[Streamer] InnerTube failed (${innerErr?.message || innerErr}), falling back to yt-dlp for ${videoId}`
+        );
+        result = await extractWithYtDlp(videoId);
+        lastYtDlpError = null;
+        console.log(
+          `[Streamer] yt-dlp resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`
+        );
+      }
+    } else {
+      result = await extractWithYtDlp(videoId);
+      lastYtDlpError = null;
+      console.log(
+        `[Streamer] yt-dlp (forced) resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`
+      );
+    }
+
+    streamCache.set(videoId, {
+      url: result.url,
+      mimeType: result.mimeType,
+      bitrate: result.bitrate,
+      contentLength: result.contentLength,
+      extractor: result.extractor,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+
+    return result;
+  })();
+
+  if (!forceYtDlp) {
+    inFlightResolves.set(videoId, resolvePromise);
+  }
+
   try {
-    result = await extractWithYtDlp(videoId);
-    lastYtDlpError = null;
-    console.log(`[Streamer] yt-dlp resolved ${videoId}: ${result.mimeType}, ${result.contentLength} bytes`);
-  } catch (err: any) {
-    lastYtDlpError = err?.message || String(err);
-    resolvedYtDlpBinary = null; // Allow re-probing binary path on next attempt
-    console.warn(`[Streamer] yt-dlp failed (${lastYtDlpError}), falling back to InnerTube for ${videoId}`);
-    result = await extractWithInnerTube(videoId);
+    return await resolvePromise;
+  } finally {
+    if (!forceYtDlp) {
+      inFlightResolves.delete(videoId);
+    }
   }
-
-  streamCache.set(videoId, {
-    url: result.url,
-    mimeType: result.mimeType,
-    bitrate: result.bitrate,
-    contentLength: result.contentLength,
-    extractor: result.extractor,
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  });
-
-  return result;
 }
 
 /** Strip codec parameters — browsers require clean MIME types in HTTP Content-Type */
@@ -388,17 +443,45 @@ export async function handleAudioStream(
       reqEnd = Math.min(reqEnd, totalLength - 1);
     }
 
+    // Fast path: Serve small iOS Safari head probes (bytes=0-1, bytes=0-65535) from RAM cache
+    if (isRangeRequest && reqEnd !== undefined && reqEnd < HEAD_CACHE_BYTES) {
+      const cachedHead = headChunkCache.get(videoId);
+      if (cachedHead && Date.now() < cachedHead.expiresAt && reqEnd < cachedHead.buf.length) {
+        const slice = cachedHead.buf.subarray(reqStart, reqEnd + 1);
+        const total = cachedHead.totalLength ?? totalLength;
+        res.status(206)
+          .setHeader('Content-Type', cachedHead.contentType)
+          .setHeader('Accept-Ranges', 'bytes')
+          .setHeader('Cache-Control', 'no-cache')
+          .setHeader(
+            'Access-Control-Expose-Headers',
+            'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+          );
+        if (total) {
+          res.setHeader('Content-Range', `bytes ${reqStart}-${reqEnd}/${total}`);
+        }
+        res.setHeader('Content-Length', String(slice.length));
+        res.end(slice);
+        return;
+      }
+    }
+
+    // If this is an initial head probe (reqStart === 0, small reqEnd), fetch 512 KB once to warm headChunkCache
+    const isSmallHeadProbe = isRangeRequest && reqStart === 0 && reqEnd !== undefined && reqEnd < HEAD_CACHE_BYTES;
+
     // Fetch first chunk BEFORE sending HTTP headers so 403/410 retries stay clean
-    const firstChunkEnd =
-      reqEnd !== undefined
-        ? Math.min(reqStart + CHUNK_SIZE - 1, reqEnd)
-        : reqStart + CHUNK_SIZE - 1;
+    const firstChunkEnd = isSmallHeadProbe
+      ? Math.min(HEAD_CACHE_BYTES - 1, totalLength ? totalLength - 1 : HEAD_CACHE_BYTES - 1)
+      : reqEnd !== undefined
+      ? Math.min(reqStart + CHUNK_SIZE - 1, reqEnd)
+      : reqStart + CHUNK_SIZE - 1;
 
     let firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
     if (firstRes.status === 403 || firstRes.status === 410) {
-      console.warn(`[Streamer] CDN ${firstRes.status} for ${videoId} — re-resolving stream URL`);
+      console.warn(`[Streamer] CDN ${firstRes.status} for ${videoId} — re-resolving via yt-dlp`);
       streamCache.delete(videoId);
-      format = await resolveStreamFormat(videoId);
+      headChunkCache.delete(videoId);
+      format = await resolveStreamFormat(videoId, true);
       totalLength = format.contentLength;
       firstRes = await fetchChunkFromCdn(format.url, reqStart, firstChunkEnd);
     }
@@ -415,6 +498,37 @@ export async function handleAudioStream(
     const cdnTotal = parseTotalFromContentRange(firstRes.headers.get('content-range'));
     if (cdnTotal && !totalLength) {
       totalLength = cdnTotal;
+    }
+
+    if (isSmallHeadProbe && reqEnd !== undefined) {
+      const fullBuf = Buffer.from(await firstRes.arrayBuffer());
+      if (headChunkCache.size >= MAX_HEAD_CACHE_ENTRIES) {
+        const oldestKey = headChunkCache.keys().next().value;
+        if (oldestKey) headChunkCache.delete(oldestKey);
+      }
+      headChunkCache.set(videoId, {
+        buf: fullBuf,
+        totalLength,
+        contentType,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+
+      const clampedEnd = Math.min(reqEnd, fullBuf.length - 1);
+      const slice = fullBuf.subarray(reqStart, clampedEnd + 1);
+      res.status(206)
+        .setHeader('Content-Type', contentType)
+        .setHeader('Accept-Ranges', 'bytes')
+        .setHeader('Cache-Control', 'no-cache')
+        .setHeader(
+          'Access-Control-Expose-Headers',
+          'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+        );
+      if (totalLength) {
+        res.setHeader('Content-Range', `bytes ${reqStart}-${clampedEnd}/${totalLength}`);
+      }
+      res.setHeader('Content-Length', String(slice.length));
+      res.end(slice);
+      return;
     }
 
     if (totalLength) {

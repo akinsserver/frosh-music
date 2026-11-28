@@ -172,6 +172,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [recordPlay, startAudioPlayback]
   );
 
+  // Pre-warm the next track's stream URL in the background so Next/auto-advance starts instantly
+  useEffect(() => {
+    if (!currentTrack || queue.length <= 1) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const nextIdx = (queueIndex + 1) % queue.length;
+    const nextSong = queue[nextIdx];
+    if (!nextSong || nextSong.id === currentTrack.id || isDownloadedRef.current(nextSong.id)) return;
+
+    const timer = setTimeout(() => {
+      fetch(`${getStreamUrl(nextSong.id)}/info`).catch(() => {});
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [currentTrack, queue, queueIndex]);
+
   const playTrack = useCallback(
     (track: Song, newQueue?: Song[]) => {
       if (newQueue && newQueue.length > 0) {
