@@ -23,7 +23,7 @@ import type { SearchAllResponse, Song } from '@/types/music';
 import { TrackRow } from '@/components/TrackRow';
 import { usePlayer } from '@/context/PlayerContext';
 
-type SearchTab = 'all' | 'song' | 'album' | 'artist';
+type SearchTab = 'all' | 'song' | 'album' | 'artist' | 'podcast';
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -32,7 +32,7 @@ function SearchContent() {
 
   const [query, setQuery] = useState(initialQ);
   const [tab, setTab] = useState<SearchTab>(
-    ['all', 'song', 'album', 'artist'].includes(initialType) ? initialType : 'all'
+    ['all', 'song', 'album', 'artist', 'podcast'].includes(initialType) ? initialType : 'all'
   );
   const [allData, setAllData] = useState<SearchAllResponse | null>(null);
   const [results, setResults] = useState<any[]>([]);
@@ -225,6 +225,7 @@ function SearchContent() {
               { id: 'song', label: 'Tracks', icon: Music },
               { id: 'album', label: 'Albums', icon: Disc3 },
               { id: 'artist', label: 'Artists', icon: User },
+              { id: 'podcast', label: 'Podcasts', icon: Radio },
             ] as const
           ).map((t) => {
             const Icon = t.icon;
@@ -681,6 +682,94 @@ function SearchContent() {
               <p className="text-xs text-zinc-400 mt-0.5">{artist.subscribers || 'Artist'}</p>
             </Link>
           ))}
+        </div>
+      )}
+
+      {tab === 'podcast' && results.length > 0 && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {results.map((item: any, idx: number) => {
+              const isEpisode = item.type === 'episode' || typeof item.duration === 'number';
+              if (isEpisode) {
+                return (
+                  <div
+                    key={`pod-${item.id}-${idx}`}
+                    onClick={() =>
+                      playTrack(
+                        item,
+                        results.filter((r) => r.type === 'episode' || typeof r.duration === 'number')
+                      )
+                    }
+                    data-focusable="true"
+                    className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 cursor-pointer group transition-all"
+                  >
+                    <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0">
+                      {item.thumbnail ? (
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-indigo-400">
+                          <Radio className="w-6 h-6" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Play className="w-5 h-5 text-white fill-white" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                          Episode
+                        </span>
+                        {item.durationText && (
+                          <span className="text-[11px] text-zinc-500">{item.durationText}</span>
+                        )}
+                      </div>
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-zinc-400 truncate">
+                        {item.artists?.map((a: any) => a.name).join(', ') || item.author || 'Podcast'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <Link
+                  key={`pod-show-${item.id}-${idx}`}
+                  href={`/playlist/${encodeURIComponent(item.id)}`}
+                  data-focusable="true"
+                  className="flex items-center gap-3.5 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 group transition-all"
+                >
+                  <div className="w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
+                    {item.thumbnail ? (
+                      <img
+                        src={item.thumbnail}
+                        alt={item.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    ) : (
+                      <Radio className="w-6 h-6 text-indigo-400" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 mb-0.5 inline-block">
+                      Podcast Show
+                    </span>
+                    <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate">{item.author || 'Full Show'}</p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

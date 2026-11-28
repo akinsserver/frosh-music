@@ -24,7 +24,7 @@ export async function fetchHome(): Promise<{ shelves: HomeShelf[] }> {
 
 export async function searchMusic(
   query: string,
-  type: 'all' | 'song' | 'album' | 'artist' = 'all'
+  type: 'all' | 'song' | 'album' | 'artist' | 'podcast' = 'all'
 ): Promise<SearchAllResponse | { type: string; results: any[] }> {
   const params = new URLSearchParams({ q: query, type });
   return fetchJson(`/api/search?${params.toString()}`);

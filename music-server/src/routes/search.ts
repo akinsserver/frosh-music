@@ -108,6 +108,52 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (type === 'podcast') {
+      const results = await yt.music.search(`${q} podcast`);
+      const podcastItems: any[] = [];
+      const seenIds = new Set<string>();
+
+      for (const shelf of results.contents || []) {
+        for (const item of (shelf as any).contents || []) {
+          const itemType = item.item_type;
+          if (itemType === 'podcast_show') {
+            const rawId = item.id || item.browse_id || item.endpoint?.payload?.browseId;
+            const id = rawId ? (rawId.startsWith('MPSP') ? `VL${rawId.slice(4)}` : rawId) : rawId;
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              const { bestUrl } = getBestThumbnail(item.thumbnail || item.thumbnails);
+              podcastItems.push({
+                type: 'show',
+                id,
+                title: typeof item.title === 'string' ? item.title : item.title?.text || '',
+                author: item.author?.name || item.subtitle?.text || 'Podcast Show',
+                thumbnail: bestUrl,
+                isPodcast: true,
+              });
+            }
+          } else if (
+            itemType === 'non_music_track' ||
+            itemType === 'episode' ||
+            itemType === 'song' ||
+            itemType === 'video'
+          ) {
+            const formatted = formatTrackWithPlays(item);
+            if (formatted && !seenIds.has(formatted.id)) {
+              seenIds.add(formatted.id);
+              podcastItems.push({
+                type: 'episode',
+                ...formatted,
+                isPodcast: true,
+              });
+            }
+          }
+        }
+      }
+
+      res.json({ type: 'podcast', results: podcastItems });
+      return;
+    }
+
     // Default: 'all' - smart unified search with Top Result card + categorized tracks, albums, artists, playlists
     const results = await yt.music.search(q);
     const contents: any[] = results.contents || [];
@@ -173,7 +219,12 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
         if (!item) continue;
         const itemType = item.item_type;
 
-        if (itemType === 'song' || itemType === 'video') {
+        if (
+          itemType === 'song' ||
+          itemType === 'video' ||
+          itemType === 'non_music_track' ||
+          itemType === 'episode'
+        ) {
           const formatted = formatTrackWithPlays(item);
           if (formatted && !seenTrackIds.has(formatted.id)) {
             seenTrackIds.add(formatted.id);
@@ -217,6 +268,19 @@ searchRouter.get('/', async (req: Request, res: Response): Promise<void> => {
               id,
               title: typeof item.title === 'string' ? item.title : item.title?.text || '',
               author: item.author?.name || item.subtitle?.text,
+              thumbnail: bestUrl,
+            });
+          }
+        } else if (itemType === 'podcast_show') {
+          const rawId = item.id || item.browse_id || item.endpoint?.payload?.browseId;
+          const id = rawId ? (rawId.startsWith('MPSP') ? `VL${rawId.slice(4)}` : rawId) : rawId;
+          if (id && !seenPlaylistIds.has(id)) {
+            seenPlaylistIds.add(id);
+            const { bestUrl } = getBestThumbnail(item.thumbnail || item.thumbnails);
+            playlists.push({
+              id,
+              title: typeof item.title === 'string' ? item.title : item.title?.text || '',
+              author: item.author?.name || item.subtitle?.text || 'Podcast Show',
               thumbnail: bestUrl,
             });
           }
