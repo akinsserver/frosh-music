@@ -1,5 +1,5 @@
 import type { Song, PlayHistoryEvent } from '@/types/music';
-import { searchMusic } from '@/lib/api';
+import { searchMusic, API_BASE_URL } from '@/lib/api';
 import { createClient } from '@/lib/supabase';
 
 export interface ArtistAffinity {
@@ -213,25 +213,40 @@ export async function fetchPersonalizedRecommendations(
 }
 
 /**
- * Fetches Top Releases & Trending Hits this week (with millions of views/streams)
+ * Fetches Top Releases & Trending Hits this week (official YouTube Music weekly chart)
  */
 export async function fetchTopReleasesThisWeek(limit: number = 15): Promise<Song[]> {
   try {
-    const res = await searchMusic('Trending Songs This Week', 'song');
+    const res = await fetch(`${API_BASE_URL}/api/home/trending`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.songs) && data.songs.length > 0) {
+        return data.songs.slice(0, limit);
+      }
+    }
+  } catch (err) {
+    console.warn('[TopReleases] Failed to fetch official trending chart, falling back:', err);
+  }
+
+  // Fallback to latest releases search with current year
+  try {
+    const currentYear = new Date().getFullYear();
+    const res = await searchMusic(`Latest Song Releases ${currentYear}`, 'song');
     const results = (res as any)?.results || [];
     return results.slice(0, limit);
   } catch (err) {
-    console.warn('[TopReleases] Failed to fetch top releases:', err);
+    console.warn('[TopReleases] Fallback search failed:', err);
     return [];
   }
 }
 
 /**
- * Fetches trending songs in the user's favorite genre
+ * Fetches current trending songs in the user's favorite genre
  */
 export async function fetchGenreTrending(genre: string, limit: number = 15): Promise<Song[]> {
   try {
-    const res = await searchMusic(`Trending ${genre} Hits`, 'song');
+    const currentYear = new Date().getFullYear();
+    const res = await searchMusic(`New ${genre} Songs ${currentYear}`, 'song');
     const results = (res as any)?.results || [];
     return results.slice(0, limit);
   } catch (err) {

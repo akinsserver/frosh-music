@@ -35,16 +35,19 @@ function formatTime(sec: number): string {
 
 const TRANSLATION_LANGUAGES = [
   { code: 'off', label: 'Off' },
+  { code: 'en', label: 'English' },
+  { code: 'yo', label: 'Yoruba (Èdè Yorùbá)' },
+  { code: 'ig', label: 'Igbo (Asụsụ Igbo)' },
+  { code: 'sw', label: 'Swahili (Kiswahili)' },
   { code: 'fr', label: 'French (Français)' },
   { code: 'es', label: 'Spanish (Español)' },
   { code: 'de', label: 'German (Deutsch)' },
-  { code: 'id', label: 'Indonesian (Bahasa)' },
   { code: 'pt', label: 'Portuguese (Português)' },
+  { code: 'id', label: 'Indonesian (Bahasa)' },
   { code: 'it', label: 'Italian (Italiano)' },
   { code: 'ja', label: 'Japanese (日本語)' },
   { code: 'ko', label: 'Korean (한국어)' },
   { code: 'zh-CN', label: 'Chinese (中文)' },
-  { code: 'yo', label: 'Yoruba (Èdè Yorùbá)' },
 ] as const;
 
 export function FullScreenPlayer() {

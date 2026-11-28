@@ -64,3 +64,26 @@ homeRouter.get('/', async (_req: Request, res: Response): Promise<void> => {
     res.status(500).json({ error: error.message || 'Failed to fetch home feed' });
   }
 });
+
+/**
+ * Real-time Weekly Trending Charts & Top Releases
+ * Fetches the official YouTube Music Trending 20 United States chart
+ */
+homeRouter.get('/trending', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const yt = await getInnertube();
+    // Official YouTube Music Weekly Trending chart playlist
+    const pl: any = await yt.music.getPlaylist('VLOLAK5uy_kNWGJvgWVqlt5LsFDL9Sdluly4M8TvGkM');
+    const songs: any[] = [];
+    if (pl?.contents) {
+      for (const item of pl.contents) {
+        const song = formatTrackItem(item, 'Trending This Week');
+        if (song) songs.push(song);
+      }
+    }
+    res.json({ title: 'Top Releases & Hits', songs });
+  } catch (error: any) {
+    console.error('[Trending API] Error fetching trending chart:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch trending chart' });
+  }
+});
