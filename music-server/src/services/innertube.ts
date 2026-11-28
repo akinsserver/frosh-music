@@ -182,19 +182,24 @@ export function formatTrackItem(item: any, fallbackContext?: string): Song | nul
         const text = r?.text?.trim();
         if (
           text &&
-          !/^[•·|]\s*$/.test(text) &&
+          !/^[•·|&,/-]\s*$/.test(text) &&
           !/^\d+(?:\.\d+)?[KMB]?\s+(?:plays|views)$/i.test(text) &&
           !/^\d+:\d+$/.test(text) &&
-          text !== 'Unknown Artist'
+          text.toLowerCase() !== 'unknown artist'
         ) {
           artists.push({ id: r.endpoint?.payload?.browseId, name: text });
-          break;
         }
       }
     } else if (col?.title?.text) {
       const parts = col.title.text.split(/•|·|\|/);
-      if (parts[0]?.trim() && parts[0].trim() !== 'Unknown Artist') {
-        artists.push({ name: parts[0].trim() });
+      if (parts[0]?.trim() && parts[0].trim().toLowerCase() !== 'unknown artist') {
+        // Handle "Artist 1 & Artist 2"
+        const subArtists = parts[0].split(/\s+(?:&|feat\.?|ft\.?)\s+/i);
+        for (const sa of subArtists) {
+          if (sa.trim() && sa.trim().toLowerCase() !== 'unknown artist') {
+            artists.push({ name: sa.trim() });
+          }
+        }
       }
     }
   }
@@ -202,14 +207,30 @@ export function formatTrackItem(item: any, fallbackContext?: string): Song | nul
   // 6. Subtitle runs / text
   if (artists.length === 0 && item.subtitle) {
     const runs = item.subtitle?.runs;
-    if (Array.isArray(runs) && runs[0]?.text) {
-      if (runs[0].text !== 'Unknown Artist') {
-        artists.push({ id: runs[0].endpoint?.payload?.browseId, name: runs[0].text });
+    if (Array.isArray(runs) && runs.length > 0) {
+      for (const r of runs) {
+        const text = r?.text?.trim();
+        if (
+          text &&
+          !/^[•·|&,/-]\s*$/.test(text) &&
+          !/^\d+(?:\.\d+)?[KMB]?\s+(?:plays|views)$/i.test(text) &&
+          !/^\d+:\d+$/.test(text) &&
+          text.toLowerCase() !== 'unknown artist' &&
+          text.toLowerCase() !== 'song' &&
+          text.toLowerCase() !== 'video'
+        ) {
+          artists.push({ id: r.endpoint?.payload?.browseId, name: text });
+        }
       }
     } else if (typeof item.subtitle?.text === 'string') {
       const parts = item.subtitle.text.split(/•|·|\|/);
-      if (parts[0]?.trim() && parts[0].trim() !== 'Unknown Artist') {
-        artists.push({ name: parts[0].trim() });
+      if (parts[0]?.trim() && parts[0].trim().toLowerCase() !== 'unknown artist') {
+        const subArtists = parts[0].split(/\s+(?:&|feat\.?|ft\.?)\s+/i);
+        for (const sa of subArtists) {
+          if (sa.trim() && sa.trim().toLowerCase() !== 'unknown artist') {
+            artists.push({ name: sa.trim() });
+          }
+        }
       }
     }
   }

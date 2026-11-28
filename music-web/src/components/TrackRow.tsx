@@ -14,9 +14,10 @@ interface TrackRowProps {
   index?: number;
   queue?: Song[];
   showIndex?: boolean;
+  fallbackContext?: string;
 }
 
-export function TrackRow({ track, index, queue, showIndex = false }: TrackRowProps) {
+export function TrackRow({ track, index, queue, showIndex = false, fallbackContext }: TrackRowProps) {
   const { currentTrack, isPlaying, playTrack, togglePlay, addToQueue } = usePlayer();
   const { isLiked, toggleLike, playlists, addTrackToPlaylist } = useLibrary();
   const { isDownloaded, isDownloading, downloadingProgress, downloadTrack, removeDownload } = useOffline();
@@ -120,7 +121,7 @@ export function TrackRow({ track, index, queue, showIndex = false }: TrackRowPro
           )}
         </div>
         <div className="text-xs text-zinc-400 truncate mt-0.5 flex items-center gap-1">
-          {resolveSongArtists(track).map((artist, i) => (
+          {resolveSongArtists(track, fallbackContext).map((artist, i) => (
             <React.Fragment key={`${artist.name}-${i}`}>
               {i > 0 && <span>, </span>}
               {artist.id ? (

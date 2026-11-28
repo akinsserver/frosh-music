@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ShelfCarouselProps {
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   icon?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
@@ -34,7 +34,7 @@ export function ShelfCarousel({
             {icon}
             <h2 className="text-xl font-bold tracking-tight text-white truncate">{title}</h2>
           </div>
-          {subtitle && <p className="text-xs text-zinc-400 mt-0.5 truncate">{subtitle}</p>}
+          {subtitle && <div className="text-xs text-zinc-400 mt-0.5 truncate">{subtitle}</div>}
         </div>
 
         {/* Desktop scroll arrows */}

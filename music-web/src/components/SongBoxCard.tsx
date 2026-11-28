@@ -69,7 +69,22 @@ export function SongBoxCard({ song, queue, className = '', fallbackContext }: So
         </p>
         <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
           <p className="text-xs text-zinc-400 truncate">
-            {displayArtists.map((a) => a.name).join(', ')}
+            {displayArtists.map((a, i) => (
+              <React.Fragment key={`${a.name}-${i}`}>
+                {i > 0 && ', '}
+                <Link
+                  href={
+                    a.id
+                      ? `/artist/${encodeURIComponent(a.id)}`
+                      : `/search?q=${encodeURIComponent(a.name)}&type=artist`
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  className="hover:text-emerald-400 hover:underline transition-colors"
+                >
+                  {a.name}
+                </Link>
+              </React.Fragment>
+            ))}
           </p>
           {song.playCount && (
             <>

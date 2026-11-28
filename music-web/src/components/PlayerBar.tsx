@@ -17,6 +17,7 @@ import {
   Maximize2,
   Heart,
   Loader2,
+  Cast,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -53,6 +54,7 @@ export function PlayerBar() {
     setIsFullScreen,
     setShowLyrics,
     setShowQueue,
+    castAudio,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
@@ -276,6 +278,15 @@ export function PlayerBar() {
             className="w-20 accent-emerald-400 cursor-pointer"
           />
         </div>
+
+        <button
+          onClick={castAudio}
+          data-focusable="true"
+          title="Cast or AirPlay to TV / Speaker"
+          className="p-2 text-zinc-400 hover:text-white transition-colors"
+        >
+          <Cast className="w-4 h-4" />
+        </button>
 
         <button
           onClick={() => setIsFullScreen(true)}

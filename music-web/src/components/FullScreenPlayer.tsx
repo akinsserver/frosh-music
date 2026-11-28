@@ -20,6 +20,7 @@ import {
   Minimize2,
   Languages,
   Check,
+  Cast,
 } from 'lucide-react';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
@@ -71,6 +72,7 @@ export function FullScreenPlayer() {
     cycleRepeat,
     removeFromQueue,
     setIsFullScreen,
+    castAudio,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
@@ -362,7 +364,15 @@ export function FullScreenPlayer() {
             </button>
           </div>
 
-          <div className="w-11 shrink-0" />
+          <button
+            onClick={castAudio}
+            data-focusable="true"
+            aria-label="Cast or AirPlay to TV / Speaker"
+            title="Cast or AirPlay to TV / Speaker"
+            className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-white transition-all shrink-0"
+          >
+            <Cast className="w-5 h-5" />
+          </button>
         </div>
       </header>
 

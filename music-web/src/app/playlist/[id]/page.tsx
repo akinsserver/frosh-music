@@ -115,6 +115,7 @@ export default function PlaylistPage() {
             index={idx}
             queue={playlist.tracks}
             showIndex
+            fallbackContext={playlist.author || playlist.title}
           />
         ))}
       </div>

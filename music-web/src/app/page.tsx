@@ -23,6 +23,7 @@ import {
   detectUserTopGenre,
   fetchGenreTrending,
   resolveSongArtists,
+  getCurrentSeasonalTheme,
   type RecommendationResult,
 } from '@/lib/recommendations';
 import { SongBoxCard } from '@/components/SongBoxCard';
@@ -186,11 +187,30 @@ export default function HomePage() {
         </ShelfCarousel>
       )}
 
-      {/* 4. You May Also Like (Tailored Algorithmic Recommendations) */}
+      {/* 4. You May Also Like (Tailored Algorithmic Recommendations with Clickable Artists) */}
       {personalizedRecs && personalizedRecs.songs.length > 0 && (
         <ShelfCarousel
           title={personalizedRecs.shelfTitle}
-          subtitle={personalizedRecs.subtitle}
+          subtitle={
+            <span>
+              Tailored for you based on{' '}
+              {personalizedRecs.topArtists.map((artist, idx) => (
+                <React.Fragment key={`${artist.name}-${idx}`}>
+                  {idx > 0 && ' & '}
+                  <Link
+                    href={
+                      artist.id
+                        ? `/artist/${encodeURIComponent(artist.id)}`
+                        : `/search?q=${encodeURIComponent(artist.name)}&type=artist`
+                    }
+                    className="text-emerald-400 hover:text-emerald-300 font-semibold underline decoration-emerald-500/40 hover:decoration-emerald-400 transition-colors"
+                  >
+                    {artist.name}
+                  </Link>
+                </React.Fragment>
+              ))}
+            </span>
+          }
           icon={<Flame className="w-4 h-4 text-emerald-400" />}
         >
           {personalizedRecs.songs.map((song) => (
@@ -241,17 +261,25 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 6. Categorized InnerTube Home Shelves (Swipeable Horizontal Form) */}
+      {/* 6. Categorized Home Shelves (Swipeable Horizontal Form with Dynamic Seasonal Adaptation) */}
       {!loading &&
         shelves.map((shelf, idx) => {
           const songItems = shelf.items.filter(isSongItem) as Song[];
           const cardItems = shelf.items.filter((i) => !isSongItem(i)) as HomeCardItem[];
 
+          // Dynamic seasonal adaptation for holiday/seasonal shelves
+          const seasonalTheme = getCurrentSeasonalTheme();
+          const isHolidayShelf =
+            shelf.title.toLowerCase().includes('holiday') ||
+            shelf.title.toLowerCase().includes('christmas');
+          const displayTitle = isHolidayShelf ? seasonalTheme.title : shelf.title;
+          const displaySubtitle = isHolidayShelf ? seasonalTheme.subtitle : shelf.subtitle;
+
           return (
             <ShelfCarousel
               key={`${shelf.title}-${idx}`}
-              title={shelf.title}
-              subtitle={shelf.subtitle}
+              title={displayTitle}
+              subtitle={displaySubtitle}
             >
               {songItems.length > 0 &&
                 songItems.map((song) => (
@@ -259,7 +287,7 @@ export default function HomePage() {
                     key={`shelf-${shelf.title}-${song.id}`}
                     song={song}
                     queue={songItems}
-                    fallbackContext={shelf.title}
+                    fallbackContext={displayTitle}
                   />
                 ))}
 
@@ -280,7 +308,7 @@ export default function HomePage() {
                       className="group w-36 sm:w-44 shrink-0 snap-start flex flex-col p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] active:scale-[0.98] border border-white/5 transition-all"
                     >
                       <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-zinc-800 mb-2.5 shadow-md">
-                        {card.thumbnail && (
+                        {card.thumbnail ? (
                           <img
                             src={card.thumbnail}
                             alt={card.title}
@@ -288,6 +316,10 @@ export default function HomePage() {
                             loading="lazy"
                             referrerPolicy="no-referrer"
                           />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-600 font-bold text-lg">
+                            {card.type === 'artist' ? '👤' : '🎵'}
+                          </div>
                         )}
                         <div className="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-emerald-500 text-zinc-950 flex items-center justify-center opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 group-hover:scale-105 transition-all shadow-xl">
                           <Play className="w-5 h-5 fill-current ml-0.5" />

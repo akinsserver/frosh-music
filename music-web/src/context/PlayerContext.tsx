@@ -47,6 +47,7 @@ interface PlayerContextValue {
   setIsFullScreen: (open: boolean) => void;
   setShowLyrics: (open: boolean) => void;
   setShowQueue: (open: boolean) => void;
+  castAudio: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -488,6 +489,46 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [togglePlay, nextTrack, prevTrack, toggleMute]);
 
+  const castAudio = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // 1. Apple AirPlay (Safari / iOS / iPadOS / macOS PWA)
+    if (typeof (audio as any).webkitShowPlaybackTargetPicker === 'function') {
+      try {
+        (audio as any).webkitShowPlaybackTargetPicker();
+        return;
+      } catch (e) {
+        console.warn('[AirPlay] webkitShowPlaybackTargetPicker error:', e);
+      }
+    }
+
+    // 2. Google Cast / Remote Playback API (Chrome / Android / Edge)
+    if ((audio as any).remote && typeof (audio as any).remote.prompt === 'function') {
+      try {
+        await (audio as any).remote.prompt();
+        return;
+      } catch (e: any) {
+        if (e?.name !== 'NotAllowedError') {
+          console.warn('[Cast] RemotePlayback.prompt error:', e);
+        }
+      }
+    }
+
+    // 3. Audio Output Device Picker (Chrome / Edge selectAudioOutput)
+    if (navigator.mediaDevices && typeof (navigator.mediaDevices as any).selectAudioOutput === 'function') {
+      try {
+        const device = await (navigator.mediaDevices as any).selectAudioOutput();
+        if (device && typeof (audio as any).setSinkId === 'function') {
+          await (audio as any).setSinkId(device.deviceId);
+        }
+        return;
+      } catch (e) {
+        console.warn('[AudioDevice] selectAudioOutput error:', e);
+      }
+    }
+  }, []);
+
   return (
     <PlayerContext.Provider
       value={{
@@ -521,9 +562,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsFullScreen,
         setShowLyrics,
         setShowQueue,
+        castAudio,
       }}
     >
-      <audio ref={audioRef} preload="auto" playsInline className="hidden" />
+      <audio ref={audioRef} preload="auto" playsInline x-webkit-airplay="allow" className="hidden" />
       {children}
     </PlayerContext.Provider>
   );
